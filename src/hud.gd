@@ -21,6 +21,8 @@ var scene = null
 var title_screen = null
 # the Reliquary, opened from the title screen: {pick, t, msg, msg_t}
 var reliquary = null
+# the Codex screen over the title: {pick, t}
+var codex = null
 # achievement toasts: [{name, t}]
 var toasts: Array = []
 var hp_show := 1.0
@@ -97,10 +99,14 @@ func _process(dt: float) -> void:
 	toasts = toasts.filter(func(tst): return tst.t < 4.0)
 	if title_screen != null and reliquary != null:
 		_step_reliquary(dt)
+	elif title_screen != null and codex != null:
+		_step_codex(dt)
 	elif title_screen != null:
 		title_screen.t += dt
 		if title_screen.t > 0.4 and Input.is_action_just_pressed("dash"):
 			reliquary = {"pick": 0, "t": 0.0, "msg": "", "msg_t": 0.0}
+		if title_screen.t > 0.4 and Input.is_action_just_pressed("skill"):
+			codex = {"pick": 0, "t": 0.0}
 		if Input.is_action_just_pressed("left"):
 			game.vigil = maxi(0, game.vigil - 1)
 		if Input.is_action_just_pressed("right"):
@@ -208,6 +214,8 @@ func _paint() -> void:
 		_paint_title(vp)
 		if reliquary != null:
 			_paint_reliquary(vp)
+		elif codex != null:
+			_paint_codex(vp)
 	elif scene != null:
 		_paint_scene(vp)
 	elif menu != null:
@@ -220,7 +228,7 @@ func _paint() -> void:
 		var r := Rect2(vp.x - 330, vp.y - 110 - i * 64, 310, 54)
 		canvas.draw_rect(r, Color(0.04, 0.03, 0.05, 0.9 * a))
 		canvas.draw_rect(r, Color(0.95, 0.7, 0.23, a), false, 1.5)
-		_text("ACHIEVEMENT", r.position + Vector2(14, 20), 11, Color(0.95, 0.7, 0.23, a))
+		_text(tst.get("head", "ACHIEVEMENT"), r.position + Vector2(14, 20), 11, Color(0.95, 0.7, 0.23, a))
 		_text(tst.name, r.position + Vector2(14, 42), 18, Color(0.95, 0.92, 0.88, a))
 	if flash_t > 0:
 		canvas.draw_rect(Rect2(Vector2.ZERO, vp), Color(flash_col, clampf(flash_t * 4, 0, 1) * 0.85))
@@ -244,7 +252,56 @@ func _paint_title(vp: Vector2) -> void:
 	var blink := 0.5 + 0.5 * sin(t * 4)
 	_text("PRESS SPACE OR J TO DESCEND", Vector2(mid.x, vp.y - 70), 16, Color(0.95, 0.92, 0.88, 0.4 + 0.6 * blink), true)
 	var open := RunData.RELICS.filter(func(r): return not r.id in game.relics).size()
-	_text("SHIFT / K / RB  THE RELIQUARY  ·  %d TO BUY" % open if open > 0 else "THE RELIQUARY IS COMPLETE", Vector2(mid.x, vp.y - 44), 12, Color("#3fd6c4"), true)
+	var rq := "SHIFT / K / RB  THE RELIQUARY  ·  %d TO BUY" % open if open > 0 else "THE RELIQUARY IS COMPLETE"
+	var cx := "L / Q / Y  THE CODEX  ·  %d / %d" % [game.codex.size(), Codex.ENTRIES.size()]
+	_text(rq + "      " + cx, Vector2(mid.x, vp.y - 44), 12, Color("#3fd6c4"), true)
+
+
+func _step_codex(dt: float) -> void:
+	var c: Dictionary = codex
+	c.t += dt
+	var n := Codex.ENTRIES.size()
+	if Input.is_action_just_pressed("up"):
+		c.pick = (c.pick + n - 1) % n
+	if Input.is_action_just_pressed("down"):
+		c.pick = (c.pick + 1) % n
+	if c.t > 0.25 and (Input.is_action_just_pressed("dash") or Input.is_action_just_pressed("pause") or Input.is_action_just_pressed("skill")):
+		codex = null
+
+
+func _paint_codex(vp: Vector2) -> void:
+	var c: Dictionary = codex
+	canvas.draw_rect(Rect2(Vector2.ZERO, vp), Color(0.02, 0.01, 0.02, 0.95))
+	var mid := vp / 2
+	_text("THE CODEX", Vector2(mid.x, 70), 40, Color("#f3ebe0"), true)
+	_text("%d OF %d PAGES  ·  EVERYTHING THE DARK HAS SHOWN YOU" % [game.codex.size(), Codex.ENTRIES.size()], Vector2(mid.x, 96), 13, Color("#3fd6c4"), true)
+	var cols := {Codex.LORE: Color("#f2b43a"), Codex.PLACE: Color("#3fd6c4"), Codex.FOE: Color("#e5383b"), Codex.BOSS: Color("#b44dff")}
+	var x0 := mid.x - 440
+	var rows := 14
+	var top := clampi(c.pick - rows / 2, 0, maxi(0, Codex.ENTRIES.size() - rows))
+	for j in mini(rows, Codex.ENTRIES.size()):
+		var i := top + j
+		var e: Dictionary = Codex.ENTRIES[i]
+		var y := 124.0 + j * 30
+		var known: bool = e.id in game.codex
+		if i == c.pick:
+			canvas.draw_rect(Rect2(x0, y, 300, 26), Color(0.08, 0.06, 0.09, 1))
+			canvas.draw_rect(Rect2(x0, y, 300, 26), Color("#f2b43a"), false, 2)
+		_text(e.cat, Vector2(x0 + 10, y + 17), 9, cols[e.cat])
+		_text(e.name if known else "? ? ?", Vector2(x0 + 64, y + 18), 14, Color("#f3ebe0") if known else Color(0.4, 0.37, 0.35))
+	var sel: Dictionary = Codex.ENTRIES[c.pick]
+	var bx := x0 + 330
+	canvas.draw_rect(Rect2(bx, 124, 550, 400), Color(0.05, 0.04, 0.06, 1))
+	if sel.id in game.codex:
+		_text(sel.name, Vector2(bx + 24, 164), 24, cols[sel.cat])
+		var y2 := 200.0
+		for line in _wrap(sel.text, 500, 16):
+			_text(line, Vector2(bx + 24, y2), 16, Color(0.85, 0.8, 0.76))
+			y2 += 24
+	else:
+		_text("This page is still dark.", Vector2(bx + 24, 164), 18, Color(0.5, 0.46, 0.43))
+		_text("Keep descending.", Vector2(bx + 24, 192), 14, Color(0.4, 0.37, 0.35))
+	_text("UP / DOWN  CHOOSE      SHIFT / ESC  BACK", Vector2(mid.x, vp.y - 30), 12, Color(0.55, 0.5, 0.47), true)
 
 
 func _step_reliquary(dt: float) -> void:

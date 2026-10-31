@@ -58,6 +58,8 @@ var wins := 0
 var sets_done: Array[String] = []
 var unlocked_vigil := 0
 var achieved: Array = []
+# Codex entry ids unlocked by play (see Codex)
+var codex: Array = []
 var relics: Array = []
 var skill_meter := 0.0 ## 0..1, full = the weapon skill is ready
 var skill_hit := false ## true while a skill's own hits land, so they don't refill the meter
@@ -216,6 +218,9 @@ func _smoke(dt: float) -> void:
 					use_skill()
 				print("smoke test: all weapon skills fired")
 				hud.open_title(_smoke_title_ok)
+				# the Codex paints over the title during the map sweep
+				hud.codex = {"pick": Codex.ENTRIES.size() - 1, "t": 0.0}
+				print("smoke test: codex %d / %d" % [codex.size(), Codex.ENTRIES.size()])
 		3:
 			# every arena loads and runs briefly
 			smoke_p_t += dt
@@ -429,6 +434,9 @@ func _play_once(id: String, cards: Array, cb: Callable) -> void:
 
 
 func _weapon_draw() -> void:
+	learn("norrow")
+	learn("hild")
+	learn("place_0")
 	var pool := RunData.WEAPONS.keys().filter(func(k): return not RunData.WEAPONS[k].get("locked", false) or k in relics)
 	pool.shuffle()
 	var opts := []
@@ -484,6 +492,22 @@ func _log_run() -> void:
 	f.close()
 	if smoke:
 		print("smoke test: run logged, won %s, depth %d" % [won, depth])
+
+
+## Unlocks a Codex entry once and shows a toast.
+func learn(id: String) -> void:
+	if id in codex:
+		return
+	var e := Codex.find(id)
+	if e.is_empty():
+		return
+	codex.append(id)
+	_save_meta()
+	hud.toasts.append({"name": e.name, "head": "NEW IN THE CODEX", "t": 0.0})
+	if codex.size() >= Codex.ENTRIES.size():
+		unlock("CODEX")
+	if smoke:
+		print("smoke test: codex %s" % id)
 
 
 ## Buys relic i from the Reliquary if the bank allows. Returns true on a purchase.
@@ -660,6 +684,7 @@ func _load_meta() -> void:
 		best_depth = cfg.get_value("meta", "best_depth", 0)
 		wins = cfg.get_value("meta", "wins", 0)
 		achieved = cfg.get_value("achievements", "unlocked", [])
+		codex = cfg.get_value("meta", "codex", [])
 		relics = cfg.get_value("meta", "relics", [])
 		if earned >= 400 and not "sickle" in relics:
 			# saves from before the Reliquary unlocked the sickle at 400 earned
@@ -683,6 +708,7 @@ func _save_meta() -> void:
 	cfg.set_value("meta", "best_depth", best_depth)
 	cfg.set_value("meta", "wins", wins)
 	cfg.set_value("achievements", "unlocked", achieved)
+	cfg.set_value("meta", "codex", codex)
 	cfg.set_value("meta", "relics", relics)
 	cfg.set_value("achievements", "elite_kills", elite_kills)
 	cfg.set_value("options", "shake", opt_shake)
@@ -787,12 +813,14 @@ func next_depth() -> void:
 	else:
 		var sub: String = {2: "GLOOMWINGS JOIN", 3: "HEXERS APPEAR", 6: "BRUTES APPEAR"}.get(depth, "%d OF 15 STILL LIT" % (15 - candles_out()))
 		hud.show_banner("DEPTH %s · A CANDLE GOES OUT" % roman(depth), sub)
+		learn("hush")
 
 
 func _enter_chapter() -> void:
 	story_hold = false
 	var ch: Dictionary = Story.CHAPTERS[chapter()]
 	_load_arena(ch.map)
+	learn("place_%d" % chapter())
 	hud.show_banner("DEPTH %s" % roman(depth), ch.name, 2.2)
 
 
@@ -813,6 +841,7 @@ func _spawn_boss() -> void:
 	boss.reset_physics_interpolation()
 	enemies.append(boss)
 	boss_untouched = true
+	learn("strepitus")
 	shake(0.7, 18)
 	hitstop = 0.15
 	hud.show_banner("DEPTH %s · STREPITUS" % roman(depth), "%s DESCENDS" % boss.boss_name, 2.4)
@@ -820,6 +849,9 @@ func _spawn_boss() -> void:
 
 ## After a boss: its last words, then the merchant. After Saint Umber: the finale and the dawn.
 func _after_boss(ch: int) -> void:
+	learn("boss_%d" % ch)
+	if ch == 1:
+		learn("umber")
 	if "ember_flask" in relics:
 		heal(1)
 	if ch == 3:
@@ -830,6 +862,7 @@ func _after_boss(ch: int) -> void:
 
 func _victory() -> void:
 	won = true
+	learn("dawn")
 	unlock("DAWN")
 	if hidden_candle and vigil < 3:
 		unlock("DAWN_UNAIDED")
@@ -1002,7 +1035,10 @@ func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 		fx.burst(e.position + Vector2(0, -28), 18, Color("#0a0a0d"), 260)
 		e.visible = false
 		_drop_wax(e.position + Vector2(0, -28), 26 if e == boss else (4 if e.kind == Enemy.Kind.BRUTE else 2) * (3 if e.elite != "" else 1))
+		if e != boss:
+			learn("foe_%d" % e.kind)
 		if e.elite != "":
+			learn("elite")
 			elite_kills += 1
 			if elite_kills >= 25:
 				unlock("ELITE_HUNTER")
