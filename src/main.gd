@@ -51,6 +51,12 @@ const SAVE_PATH := "user://tenebrae.cfg"
 var bank := 0
 var earned := 0
 var seen: Array = []
+var vigil := 0
+var vigil_max := 0
+var best_depth := 0
+var wins := 0
+var sets_done: Array[String] = []
+var unlocked_vigil := 0
 
 # --smoke (used by CI): a bot mashes inputs, depths fly by, and the run is forced
 # through the boss, the hidden candle and a death, then the game quits.
@@ -113,7 +119,7 @@ func _ready() -> void:
 	if smoke:
 		depth_time = 2.0
 		print("smoke test: start")
-	start(map_i)
+	start(0, not smoke)
 
 
 func _smoke(dt: float) -> void:
@@ -164,6 +170,11 @@ func _smoke(dt: float) -> void:
 				player.dead = false
 				player.hp = player.max_hp
 				Engine.time_scale = 1.0
+				open_pause()
+				var m = hud.menu
+				hud.menu = null
+				m.cb.call(0)
+				hud.open_title(_smoke_title_ok)
 		3:
 			# every arena loads and runs briefly
 			smoke_p_t += dt
@@ -175,6 +186,10 @@ func _smoke(dt: float) -> void:
 			if smoke_p_t > MAPS.size() * 0.8 + 1:
 				print("smoke test: done, depth %d, kills %d" % [depth, kills])
 				get_tree().quit()
+
+
+func _smoke_title_ok() -> void:
+	print("smoke test: pause and title screen ok")
 
 
 func _smoke_hit() -> void:
@@ -209,7 +224,7 @@ func chapter() -> int:
 
 
 ## A new run. i is the map; the story always begins in the Pit, the number keys can start elsewhere for testing.
-func start(i: int) -> void:
+func start(i: int, show_title := false) -> void:
 	Engine.time_scale = 1.0
 	if player:
 		player.queue_free()
@@ -230,6 +245,7 @@ func start(i: int) -> void:
 	story_hold = false
 	won = false
 	runes.clear()
+	sets_done.clear()
 	lvl = 1
 	xp = 0
 	run_wax = 0
@@ -241,7 +257,36 @@ func start(i: int) -> void:
 	hitstop = 0.0
 	_load_meta()
 	_load_arena(i)
+	if show_title:
+		hud.open_title(_begin)
+	else:
+		_begin()
+
+
+## The run proper: Vigil rules apply, then the prologue (first time) and the weapon draw.
+func _begin() -> void:
+	hidden_candle = vigil < 3
+	if vigil >= 5:
+		player.max_hp -= 1
+		player.hp = player.max_hp
 	_play_once("prologue", Story.PROLOGUE, _weapon_draw)
+
+
+func open_pause() -> void:
+	var opts := [
+		{"id": "resume", "name": "RESUME", "desc": "Back into the dark.", "tag": ""},
+		{"id": "restart", "name": "RESTART", "desc": "Abandon this run. Wax you carry is lost.", "tag": ""},
+		{"id": "title", "name": "TITLE", "desc": "Abandon this run and return to the title.", "tag": ""},
+	]
+	hud.open_choice("PAUSED", "DEPTH %s  ·  %s" % [roman(depth), Story.CHAPTERS[chapter()].name], opts, _pause_pick.bind(opts))
+
+
+func _pause_pick(i: int, opts: Array) -> void:
+	match opts[i].id:
+		"restart":
+			start(0)
+		"title":
+			start(0, true)
 
 
 ## Swaps the arena under a running game: chapters move the run to a new dungeon.
@@ -321,6 +366,8 @@ func damage_mul() -> float:
 		m *= 1.25
 	if has_rune("GLASS EDGE"):
 		m *= 1.6
+	if "EDGE" in sets_done:
+		m *= 1.15
 	if brazier_buff():
 		m *= BRAZIER_DMG
 	return m
@@ -357,6 +404,15 @@ func _take_rune(id: String) -> void:
 			player.hp = minf(player.hp, 3)
 	var rd: Dictionary = RunData.RUNES[id]
 	hud.show_banner(id, String(rd.desc).to_upper(), 1.4)
+	var sg: String = rd.sig
+	if not sg in sets_done and runes.filter(func(r): return RunData.RUNES[r].sig == sg).size() >= 2:
+		sets_done.append(sg)
+		match sg:
+			"GALE":
+				player.dash_cooldown *= 0.75
+			"ECHO":
+				player.slam_radius *= 1.25
+		hud.show_banner("%s SET" % sg, String(RunData.SETS[sg]).to_upper(), 2.0)
 
 
 func heal(n: int) -> void:
@@ -391,6 +447,9 @@ func _load_meta() -> void:
 		bank = cfg.get_value("meta", "bank", 0)
 		earned = cfg.get_value("meta", "earned", 0)
 		seen = cfg.get_value("story", "seen", [])
+		vigil_max = cfg.get_value("meta", "vigil_max", 0)
+		best_depth = cfg.get_value("meta", "best_depth", 0)
+		wins = cfg.get_value("meta", "wins", 0)
 
 
 func _save_meta() -> void:
@@ -398,6 +457,9 @@ func _save_meta() -> void:
 	cfg.set_value("meta", "bank", bank)
 	cfg.set_value("meta", "earned", earned)
 	cfg.set_value("story", "seen", seen)
+	cfg.set_value("meta", "vigil_max", vigil_max)
+	cfg.set_value("meta", "best_depth", best_depth)
+	cfg.set_value("meta", "wins", wins)
 	cfg.save(SAVE_PATH)
 
 
@@ -426,7 +488,7 @@ func _step_pickups(dt: float) -> void:
 		pk.pos = np
 		if d.length() < 22:
 			pk.t = 99.0
-			run_wax += 3 if has_rune("HUNGER") else 2
+			run_wax += (3 if has_rune("HUNGER") else 2) + (1 if "EMBER" in sets_done else 0)
 			xp += 1
 			if xp >= xp_need():
 				xp -= xp_need()
@@ -469,7 +531,7 @@ func _physics_process(dt: float) -> void:
 	spawn_t -= dt
 	var alive := enemies.filter(func(e): return not e.dead).size()
 	if spawn_t <= 0 and alive < (4 if boss else mini(22, 4 + depth * 2)) and world.portals.size() > 0:
-		spawn_t = maxf(0.6, SPAWN_EVERY - depth * 0.15)
+		spawn_t = maxf(0.6, SPAWN_EVERY - depth * 0.15) * (0.75 if vigil >= 2 else 1.0)
 		_spawn()
 
 
@@ -533,7 +595,7 @@ func _victory() -> void:
 
 
 func hp_mul() -> float:
-	return 1.0 + (depth - 1) * 0.3
+	return (1.0 + (depth - 1) * 0.3) * (1.25 if vigil >= 1 else 1.0)
 
 
 ## Returns true if the hidden candle brought the player back.
@@ -558,10 +620,13 @@ func try_revive() -> bool:
 func strike_braziers(box: Rect2) -> void:
 	for i in world.braziers.size():
 		var b: Vector2 = world.braziers[i]
-		if brazier_t[i] < BRAZIER_TIME - 0.5 and box.has_point(b):
-			brazier_t[i] = BRAZIER_TIME
+		var dur := BRAZIER_TIME * (2.0 if has_rune("KINDLING") else 1.0) * (0.5 if vigil >= 4 else 1.0)
+		if brazier_t[i] < dur - 0.5 and box.has_point(b):
+			brazier_t[i] = dur
 			fx.burst(b, 16, Color("#f2b43a"), 180)
-			hud.show_banner("BRAZIER RELIT", "+15% DAMAGE AND MORE LIGHT FOR 20 S", 1.2)
+			if has_rune("KINDLING"):
+				heal(1)
+			hud.show_banner("BRAZIER RELIT", "+15%% DAMAGE AND MORE LIGHT FOR %d S" % int(dur), 1.2)
 
 
 func brazier_buff() -> bool:
@@ -578,17 +643,23 @@ func fire_hex(from: Vector2, to: Vector2) -> void:
 	hexes.append({"pos": from, "vel": v, "life": 3.0})
 
 
+## The forged throw spinning blades that fly flat along the floor.
+func fire_blade(from: Vector2, dir: int) -> void:
+	hexes.append({"pos": from, "vel": Vector2(dir * 520, 0), "life": 2.0, "blade": true})
+
+
 func _step_hexes(dt: float) -> void:
 	for h in hexes:
 		var v: Vector2 = h.vel
-		v.y += 900 * dt
+		if not h.has("blade"):
+			v.y += 900 * dt
 		h.vel = v
 		h.pos += v * dt
 		h.life -= dt
 		var hp_: Vector2 = h.pos
 		if world.is_solid(world.cell(hp_.x), world.cell(hp_.y)):
 			h.life = 0
-			fx.burst(hp_, 8, Color("#b44dff"), 120)
+			fx.burst(hp_, 8, Color("#ff8a5c") if h.has("blade") else Color("#b44dff"), 120)
 		elif player.hurtbox().grow(6).has_point(hp_):
 			h.life = 0
 			player.take_hit(hp_.x)
@@ -600,7 +671,15 @@ func _draw_hexes() -> void:
 		var a := 0.5 + 0.5 * sin(pk.t * 10)
 		hex_layer.draw_circle(pk.pos, 7, Color(0.25, 0.84, 0.77, 0.25 + 0.15 * a))
 		hex_layer.draw_colored_polygon(PackedVector2Array([pk.pos + Vector2(0, -5), pk.pos + Vector2(4, 0), pk.pos + Vector2(0, 5), pk.pos + Vector2(-4, 0)]), Color("#3fd6c4"))
+	var tk := Time.get_ticks_msec() / 1000.0
 	for h in hexes:
+		if h.has("blade"):
+			var c: Vector2 = h.pos
+			hex_layer.draw_circle(c, 11, Color(1, 0.55, 0.36, 0.25))
+			for a in 3:
+				var ang := tk * 18 + a * TAU / 3
+				hex_layer.draw_line(c, c + Vector2(cos(ang), sin(ang)) * 10, Color("#ffd2b8"), 2.5)
+			continue
 		hex_layer.draw_circle(h.pos, 9, Color(0.7, 0.3, 1, 0.3))
 		hex_layer.draw_circle(h.pos, 5, Color("#b44dff"))
 
@@ -628,13 +707,18 @@ func _spawn() -> void:
 	e.game = self
 	var q := randf()
 	var k := Enemy.Kind.HOLLOW
-	if depth >= 3 and q < 0.14:
+	# each lower dungeon has its own enemy
+	var own: Array = [Enemy.Kind.HOLLOW, Enemy.Kind.DROWNED, Enemy.Kind.FORGED, Enemy.Kind.SNUFFER]
+	var ch := chapter()
+	if ch > 0 and q < 0.22:
+		k = own[ch]
+	elif depth >= 3 and q < 0.34:
 		k = Enemy.Kind.HEXER
-	elif depth >= 2 and q < 0.34:
+	elif depth >= 2 and q < 0.52:
 		k = Enemy.Kind.GLOOMWING
-	elif depth >= 5 and q < 0.48:
+	elif depth >= 5 and q < 0.64:
 		k = Enemy.Kind.BRUTE
-	e.setup(k, hp_mul())
+	e.setup(k, hp_mul() * (1.3 if has_rune("TALLOW CROWN") else 1.0))
 	e.position = at + (Vector2.ZERO if k == Enemy.Kind.GLOOMWING else Vector2(0, 18))
 	add_child(e)
 	move_child(e, world.get_index() + 1)
@@ -645,7 +729,7 @@ func _spawn() -> void:
 func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 	if e.dead:
 		return
-	e.hp -= dmg * damage_mul()
+	e.hp -= dmg * damage_mul() * (1.6 if e == boss and has_rune("TALLOW CROWN") else 1.0)
 	e.knock(kb)
 	hitstop = maxf(hitstop, 0.05)
 	shake(0.1, 5)
@@ -656,6 +740,14 @@ func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 		fx.burst(e.position + Vector2(0, -28), 18, Color("#0a0a0d"), 260)
 		e.visible = false
 		_drop_wax(e.position + Vector2(0, -28), 26 if e == boss else (4 if e.kind == Enemy.Kind.BRUTE else 2))
+		if has_rune("SECOND WIND"):
+			player.dash_cd = 0
+			player.air_dash_used = false
+		if has_rune("REQUIEM") and e != boss:
+			fx.ring(e.position + Vector2(0, -28), 120, Color("#b44dff"))
+			for o in enemies.duplicate():
+				if o != e and not o.dead and o.position.distance_to(e.position) < 120:
+					hit_enemy(o, 1, Vector2(signf(o.position.x - e.position.x) * 260, -260))
 		if has_rune("BLOODLINE") and kills % 20 == 0:
 			heal(1)
 			hud.show_banner("BLOODLINE", "+1 HEART", 1.0)
@@ -687,8 +779,17 @@ func _end_run() -> void:
 	var before := earned
 	bank += kept
 	earned += kept
+	best_depth = maxi(best_depth, depth)
+	if won:
+		wins += 1
+		if vigil == vigil_max and vigil_max < RunData.VIGILS.size() - 1:
+			vigil_max += 1
+			unlocked_vigil = vigil_max
 	_save_meta()
 	var unlocked := "CHAIN SICKLE" if before < 400 and earned >= 400 else ""
+	if unlocked_vigil > 0:
+		unlocked = ("%s  ·  " % unlocked if unlocked != "" else "") + "VIGIL %s" % roman(unlocked_vigil)
+		unlocked_vigil = 0
 	var title := "THE DAWN RETURNS" if won else "EXTINGUISHED"
 	var col := Color("#f2b43a") if won else Color("#e5383b")
 	hud.open_summary({"title": title, "col": col, "won": won, "depth": depth, "time": run_time, "kills": kills, "bosses": bosses, "wax": run_wax, "kept": kept, "bank": bank, "unlocked": unlocked})
@@ -719,7 +820,11 @@ func _process(dt: float) -> void:
 	if player.dead:
 		var g := dark.color.get_luminance()
 		dark.color = dark.color.lerp(Color(g, g, g), clampf(dead_t, 0, 1))
-	player_light.texture_scale = lerpf(4.5, 1.6, k) * (1.3 if brazier_buff() else 1.0)
+	var snuffed := 1.0
+	for e in enemies:
+		if e.kind == Enemy.Kind.SNUFFER and not e.dead and e.position.distance_to(player.position) < 300:
+			snuffed = 0.7
+	player_light.texture_scale = lerpf(4.5, 1.6, k) * (1.3 if brazier_buff() else 1.0) * snuffed
 	player_light.energy = lerpf(0.5, 1.1, k)
 	for i in brazier_lights.size():
 		var lit := brazier_t[i] > 0
@@ -762,9 +867,9 @@ func _unhandled_input(ev: InputEvent) -> void:
 func _setup_input() -> void:
 	var keys := {
 		"left": [KEY_A, KEY_LEFT], "right": [KEY_D, KEY_RIGHT], "down": [KEY_S, KEY_DOWN], "up": [KEY_W, KEY_UP],
-		"jump": [KEY_SPACE, KEY_Z], "attack": [KEY_J, KEY_X], "dash": [KEY_K, KEY_SHIFT, KEY_C],
+		"jump": [KEY_SPACE, KEY_Z], "attack": [KEY_J, KEY_X], "dash": [KEY_K, KEY_SHIFT, KEY_C], "pause": [KEY_ESCAPE, KEY_P],
 	}
-	var pads := {"jump": JOY_BUTTON_A, "attack": JOY_BUTTON_X, "dash": JOY_BUTTON_RIGHT_SHOULDER}
+	var pads := {"jump": JOY_BUTTON_A, "attack": JOY_BUTTON_X, "dash": JOY_BUTTON_RIGHT_SHOULDER, "pause": JOY_BUTTON_START}
 	var axes := {"left": [JOY_AXIS_LEFT_X, -1.0], "right": [JOY_AXIS_LEFT_X, 1.0], "up": [JOY_AXIS_LEFT_Y, -1.0], "down": [JOY_AXIS_LEFT_Y, 1.0]}
 	var dpad := {"left": JOY_BUTTON_DPAD_LEFT, "right": JOY_BUTTON_DPAD_RIGHT, "up": JOY_BUTTON_DPAD_UP, "down": JOY_BUTTON_DPAD_DOWN}
 	for action in keys:

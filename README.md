@@ -14,6 +14,7 @@ Open the folder in **Godot 4.3** (or newer 4.x) and press F5. The whole scene is
 | Katana (3-hit combo) | J or X | X |
 | Slam | Down + attack in the air | Down + X |
 | Dash (i-frames, cancels attacks) | K, Shift or C | RB or RT |
+| Pause | Escape or P | Start |
 | Switch arena | 1 to 5 | |
 | Restart | R | |
 | Debug panel / hitboxes | F1 / F2 | |
@@ -25,7 +26,7 @@ Open the folder in **Godot 4.3** (or newer 4.x) and press F5. The whole scene is
 - `src/world.gd` loads an ASCII arena from `maps/` and does tile collision (solid rock, one-way bridges).
 - `src/player.gd` is the controller. Physics runs at 120 Hz with coyote time, a jump buffer, variable jump height, double jump, wall slide and wall jump, dash, drop-through, slam and the 3-step katana combo. Every tuning value is an `@export`, so it can be changed in the inspector while the game runs.
 - `src/rig.gd` is the procedural stick rig ported from the web pitch. Every joint is driven by a damped spring, so pose changes get real in-betweens.
-- `src/enemy.gd` has the four regular enemies: the Hollow (grunt), Gloomwing (flyer that dives, from depth II), Hexer (lobs violet hexes in arcs, from depth III) and Brute (heavy, telegraphed club swing, from depth V). Enemies come out of the portals nearest you, and their health rises 30% per depth.
+- `src/enemy.gd` has the four regular enemies: the Hollow (grunt), Gloomwing (flyer that dives, from depth II), Hexer (lobs violet hexes in arcs, from depth III) and Brute (heavy, telegraphed club swing, from depth V). Each lower dungeon adds its own: the Drowned (the Well) crouch and pounce, the Forged (the Bladeworks) throw spinning blades along their floor, and Snuffers (the Throne) blink next to you, slash, and shrink your light while they're near. Enemies come out of the portals nearest you, and their health rises 30% per depth.
 - `src/boss.gd` holds the four bosses on one body. The Chain Warden smashes the floor and sends shockwaves both ways. The Hollow King leaps and lands in a crash. The Ashen Jarl's forge-waves run faster and he starts leaping when hurt. Saint Umber leaps, casts hexes on every landing and wears a crown of candles.
 - `src/story.gd` is the story from `docs/STORY.md` as data: the chapters, the prologue, the boss reveals, the chapter intros and endings, and the finale.
 - `src/hud.gd` draws the hearts, the depth title, the candle hearse, the cutscene cards (letterbox, focus lines, name plates, title cards), the death band and the summaries.
@@ -36,7 +37,9 @@ Open the folder in **Godot 4.3** (or newer 4.x) and press F5. The whole scene is
 
 - **Weapon draw:** each run starts with a pick of 1 of 2 weapons (katana, greatsword, spear, twin daggers). The chain sickle unlocks once you have banked 400 wax in total.
 - **Wax:** enemies drop wax that flies to you. It's your run currency and your XP.
-- **Rune drafts:** every level-up, pick 1 of 3 runes. Runes change your moves (Updraft, Ember Dash, Heavy Shadow, Finisher and more), and two are cursed.
+- **Rune drafts:** every level-up, pick 1 of 3 runes. Runes change your moves (Updraft, Ember Dash, Heavy Shadow, Second Wind, Requiem and more), and three are cursed. Two runes with the same sigil complete a set: EDGE +15% damage, GALE faster dashes, EMBER more wax per pickup, ECHO wider slams.
+- **Title screen:** shows your banked wax, deepest depth and dawns (wins), and the Vigil picker once you've won.
+- **Vigils:** each win unlocks the next of five harder levels, and each level keeps the ones below it: more enemy health, faster spawns, no hidden candle, shorter braziers, one less heart.
 - **Shade merchant:** opens after each boss. Mend, Temper, or walk on.
 - **Death:** souls-like. The world slows and drains, the Wick crumbles into embers, and **EXTINGUISHED** fades in. 40% of your wax (plus 50 per boss) is banked to `user://tenebrae.cfg`, then a new run.
 - **Victory:** beat Saint Umber at depth XVI to see the finale and **THE DAWN RETURNS**. A won run keeps all its wax.

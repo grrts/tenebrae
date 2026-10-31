@@ -22,7 +22,29 @@ const RUNES := {
 	"VIGIL": {"sig": "ECHO", "rar": "common", "desc": "+1 max heart, and heal it now."},
 	"GLASS EDGE": {"sig": "EDGE", "rar": "cursed", "desc": "Damage +60%. Max hearts drop to 3."},
 	"HUNGER": {"sig": "EMBER", "rar": "cursed", "desc": "Gain 50% more wax. You can no longer heal."},
+	"SECOND WIND": {"sig": "GALE", "rar": "rare", "desc": "Every kill resets your dash."},
+	"KINDLING": {"sig": "EMBER", "rar": "common", "desc": "Braziers burn twice as long and heal 1 heart when you relight them."},
+	"REQUIEM": {"sig": "ECHO", "rar": "common", "desc": "Kills burst into shade that hits everything close by."},
+	"TALLOW CROWN": {"sig": "EDGE", "rar": "cursed", "desc": "Bosses take 60% more damage. Every other enemy has 30% more health."},
 }
+
+# two runes with the same sigil complete a set
+const SETS := {
+	"EDGE": "All damage +15%.",
+	"GALE": "Dash cooldown -25%.",
+	"EMBER": "Every wax pickup is worth 1 more.",
+	"ECHO": "Slams are 25% wider.",
+}
+
+# Vigils: harder runs, unlocked one at a time by winning
+const VIGILS := [
+	"The rite as it was written.",
+	"Enemies have 25% more health.",
+	"Enemies come faster.",
+	"The hidden candle starts unlit.",
+	"Braziers burn for half as long.",
+	"One less heart.",
+]
 
 const SHOP := [
 	{"id": "MEND", "name": "MEND", "desc": "Heal 2 hearts.", "cost": 60},

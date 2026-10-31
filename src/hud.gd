@@ -17,12 +17,18 @@ var menu = null
 var summary = null
 # a cutscene: {cards, i, t, cb}
 var scene = null
+# the title screen: {t, cb}
+var title = null
 var flash_col := Color.WHITE
 var flash_t := 0.0
 
 
 func busy() -> bool:
-	return menu != null or summary != null or scene != null
+	return menu != null or summary != null or scene != null or title != null
+
+
+func open_title(cb: Callable) -> void:
+	title = {"t": 0.0, "cb": cb}
 
 
 ## Plays Story cards one by one. Jump or attack advances, Escape skips, and each card also moves on by itself.
@@ -79,7 +85,17 @@ func show_banner(text: String, sub: String, t := 1.6) -> void:
 func _process(dt: float) -> void:
 	banner_t = maxf(0, banner_t - dt)
 	flash_t = maxf(0, flash_t - dt)
-	if scene != null:
+	if title != null:
+		title.t += dt
+		if Input.is_action_just_pressed("left"):
+			game.vigil = maxi(0, game.vigil - 1)
+		if Input.is_action_just_pressed("right"):
+			game.vigil = mini(game.vigil_max, game.vigil + 1)
+		if title.t > 0.4 and (Input.is_action_just_pressed("jump") or Input.is_action_just_pressed("attack")):
+			var tcb: Callable = title.cb
+			title = null
+			tcb.call()
+	elif scene != null:
 		scene.t += dt
 		var c: Dictionary = scene.cards[scene.i]
 		var press: bool = scene.t > 0.35 and (Input.is_action_just_pressed("jump") or Input.is_action_just_pressed("attack"))
@@ -109,6 +125,8 @@ func _process(dt: float) -> void:
 		if summary.t > 1.2 and (Input.is_action_just_pressed("jump") or Input.is_action_just_pressed("attack")):
 			summary = null
 			game.start(0)
+	elif Input.is_action_just_pressed("pause") and game.player != null and not game.player.dead:
+		game.open_pause()
 	canvas.queue_redraw()
 
 
@@ -146,6 +164,10 @@ func _paint() -> void:
 	var build: String = RunData.WEAPONS[game.weapon].name if game.weapon != "" else ""
 	for r in game.runes:
 		build += "  ·  " + r
+	for sg in game.sets_done:
+		build += "  ·  %s SET" % sg
+	if game.vigil > 0:
+		build = "VIGIL %s  ·  %s" % [Game.roman(game.vigil), build]
 	_text(build, Vector2(16, vp.y - 16), 13, Color(0.8, 0.76, 0.7))
 	if banner_t > 0:
 		var a := clampf(banner_t * 3, 0, 1)
@@ -155,7 +177,9 @@ func _paint() -> void:
 
 	if p.dead and summary == null:
 		_paint_death(vp)
-	if scene != null:
+	if title != null:
+		_paint_title(vp)
+	elif scene != null:
 		_paint_scene(vp)
 	elif menu != null:
 		_paint_menu(vp)
@@ -163,6 +187,25 @@ func _paint() -> void:
 		_paint_summary(vp)
 	if flash_t > 0:
 		canvas.draw_rect(Rect2(Vector2.ZERO, vp), Color(flash_col, clampf(flash_t * 4, 0, 1) * 0.85))
+
+
+func _paint_title(vp: Vector2) -> void:
+	var t: float = title.t
+	canvas.draw_rect(Rect2(Vector2.ZERO, vp), Color(0.02, 0.01, 0.02, 0.96))
+	var mid := vp / 2
+	# a slow candle glow behind the name
+	for i in 6:
+		canvas.draw_circle(Vector2(mid.x, mid.y - 70), 40.0 + i * 34, Color(1, 0.65, 0.25, 0.035))
+	_text("TENEBRAE", Vector2(mid.x, mid.y - 50), 84, Color(0.95, 0.92, 0.88, clampf(t * 1.5, 0, 1)), true)
+	_text("FIFTEEN CANDLES  ·  ONE HIDDEN FLAME  ·  BRING IT HOME", Vector2(mid.x, mid.y - 10), 14, Color("#f2b43a"), true)
+	if game.vigil_max > 0:
+		var v := game.vigil
+		_text("<   VIGIL %s   >" % (Game.roman(v) if v > 0 else "0"), Vector2(mid.x, mid.y + 50), 22, Color("#e5383b") if v > 0 else Color("#f3ebe0"), true)
+		_text(RunData.VIGILS[v] if v == 0 else "Every Vigil up to %s:  %s" % [Game.roman(v), RunData.VIGILS[v]], Vector2(mid.x, mid.y + 76), 14, Color(0.7, 0.66, 0.62), true)
+	var stats := "BANKED WAX %d   ·   DEEPEST %s   ·   DAWNS %d" % [game.bank, Game.roman(maxi(1, game.best_depth)), game.wins]
+	_text(stats, Vector2(mid.x, vp.y - 110), 13, Color(0.6, 0.57, 0.54), true)
+	var blink := 0.5 + 0.5 * sin(t * 4)
+	_text("PRESS SPACE OR J TO DESCEND", Vector2(mid.x, vp.y - 70), 16, Color(0.95, 0.92, 0.88, 0.4 + 0.6 * blink), true)
 
 
 ## Souls-like death: a black band fades in and EXTINGUISHED slowly grows in it.

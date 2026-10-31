@@ -5,14 +5,21 @@ extends Actor
 ##   gloomwing  flyer: ignores tiles, drifts toward you, then dives; dies in one hit
 ##   brute      heavy: can't jump, holds its floor, long telegraphed club swing
 ##   hexer      caster: stays put and lobs hexes in an arc; you climb to reach it
+## One enemy belongs to each lower dungeon:
+##   drowned    (the Well) crouches, then pounces at you across the floor
+##   forged     (the Bladeworks) throws spinning blades straight along its floor
+##   snuffer    (the Throne) blinks next to you and slashes; near it your light shrinks
 
-enum Kind { HOLLOW, GLOOMWING, BRUTE, HEXER }
+enum Kind { HOLLOW, GLOOMWING, BRUTE, HEXER, DROWNED, FORGED, SNUFFER }
 
 const STATS := {
 	Kind.HOLLOW: {"hp": 3.0, "speed": 120.0, "w": 18.0, "h": 52.0, "scale": 0.6},
 	Kind.GLOOMWING: {"hp": 1.0, "speed": 170.0, "w": 26.0, "h": 24.0, "scale": 0.5},
 	Kind.BRUTE: {"hp": 9.0, "speed": 70.0, "w": 30.0, "h": 70.0, "scale": 0.85},
 	Kind.HEXER: {"hp": 2.0, "speed": 0.0, "w": 18.0, "h": 52.0, "scale": 0.6},
+	Kind.DROWNED: {"hp": 4.0, "speed": 90.0, "w": 20.0, "h": 50.0, "scale": 0.62},
+	Kind.FORGED: {"hp": 4.0, "speed": 55.0, "w": 22.0, "h": 56.0, "scale": 0.7},
+	Kind.SNUFFER: {"hp": 3.0, "speed": 0.0, "w": 18.0, "h": 56.0, "scale": 0.66},
 }
 
 @export var gravity := 2100.0
@@ -60,6 +67,12 @@ func _physics_process(dt: float) -> void:
 			_brute(dt)
 		Kind.HEXER:
 			_hexer(dt)
+		Kind.DROWNED:
+			_drowned(dt)
+		Kind.FORGED:
+			_forged(dt)
+		Kind.SNUFFER:
+			_snuffer(dt)
 		_:
 			_walk(dt, speed, true)
 	vel.y = minf(vel.y + gravity * dt, 1400)
@@ -150,9 +163,76 @@ func _hexer(dt: float) -> void:
 		act_cd = randf_range(2.0, 3.0)
 
 
+func _drowned(dt: float) -> void:
+	var p := game.player
+	var dx := p.position.x - position.x
+	if act > 0:
+		# crouched, about to spring
+		act -= dt
+		vel.x = move_toward(vel.x, 0, 1600 * dt)
+		if act <= 0:
+			vel = Vector2(clampf(dx * 1.6, -560, 560), -640)
+			ground = false
+		return
+	if ground and stun <= 0 and act_cd <= 0 and absf(dx) < 300 and absf(p.position.y - position.y) < 80:
+		act = 0.4
+		act_cd = randf_range(2.0, 2.8)
+		facing = 1 if dx > 0 else -1
+		return
+	if ground:
+		_walk(dt, speed, true)
+
+
+func _forged(dt: float) -> void:
+	var p := game.player
+	if act > 0:
+		act -= dt
+		vel.x = move_toward(vel.x, 0, 1200 * dt)
+		if act <= 0:
+			game.fire_blade(position + Vector2(facing * 16, -34), facing)
+		return
+	if stun <= 0 and act_cd <= 0 and absf(p.position.y - position.y) < 50 and absf(p.position.x - position.x) < 640:
+		facing = 1 if p.position.x > position.x else -1
+		act = 0.45
+		act_cd = randf_range(2.2, 3.2)
+		return
+	_walk(dt, speed, false)
+
+
+func _snuffer(dt: float) -> void:
+	var p := game.player
+	vel.x = move_toward(vel.x, 0, 900 * dt)
+	if stun > 0:
+		return
+	if act > 0:
+		var before := act
+		act -= dt
+		if before > 0.1 and act <= 0.1:
+			var box := Rect2(position.x + (0.0 if facing > 0 else -90.0), position.y - 64, 90, 64)
+			game.debug_box(box, Color(0.7, 0.3, 1, 0.4))
+			game.fx.ring(position + Vector2(facing * 45, -30), 60, Color("#b44dff"))
+			if box.intersects(p.hurtbox()):
+				p.take_hit(position.x)
+		return
+	if act_cd <= 0 and p.ground and position.distance_to(p.position) < 700:
+		# blink to whichever side of the player has floor
+		for side in [-p.facing, p.facing]:
+			var to := p.position + Vector2(side * 70, 0)
+			var wd := game.world
+			if not wd.is_solid(wd.cell(to.x), wd.cell(to.y - 20)) and wd.is_solid(wd.cell(to.x), wd.cell(to.y + 20)):
+				game.fx.burst(position + Vector2(0, -28), 10, Color("#b44dff"), 120)
+				position = to
+				vel = Vector2.ZERO
+				facing = 1 if p.position.x > position.x else -1
+				act = 0.5
+				act_cd = randf_range(2.6, 3.6)
+				game.fx.burst(position + Vector2(0, -28), 10, Color("#b44dff"), 120)
+				break
+
+
 func _touch() -> void:
 	var p := game.player
-	if kind == Kind.HEXER or kind == Kind.BRUTE:
+	if kind == Kind.HEXER or kind == Kind.BRUTE or kind == Kind.SNUFFER or kind == Kind.FORGED:
 		return
 	if not p.dead and stun <= 0 and hurtbox().grow(-2).intersects(p.hurtbox()):
 		p.take_hit(position.x)
@@ -168,7 +248,7 @@ func knock(v: Vector2) -> void:
 	vel = v * (0.35 if kind == Kind.BRUTE else 1.0)
 	stun = 0.15 if kind == Kind.BRUTE else 0.35
 	hit_t = 0.12
-	act = 0.0 if kind != Kind.BRUTE else act
+	act = 0.0 if kind != Kind.BRUTE and kind != Kind.DROWNED else act
 	ground = false
 
 
@@ -181,7 +261,7 @@ func _draw() -> void:
 		return
 	var body := Color(1, 1, 1) if hit_t > 0 else Rig.COL_SHADE
 	var rim := Color(0.9, 0.22, 0.23, 0.6)
-	var eyes := Color("#b44dff") if kind == Kind.HEXER else Color("#e5383b")
+	var eyes: Color = {Kind.HEXER: Color("#b44dff"), Kind.SNUFFER: Color("#b44dff"), Kind.DROWNED: Color("#3fd6c4"), Kind.FORGED: Color("#ff8a5c")}.get(kind, Color("#e5383b"))
 	if kind == Kind.GLOOMWING:
 		_draw_wing(body, eyes)
 	else:
@@ -194,6 +274,13 @@ func _draw() -> void:
 			var k := clampf((0.75 - act) / 0.6, 0, 1)
 			var a := lerpf(-2.6, 1.6, Rig.ease_out(k)) if act < 0.15 else -2.6
 			pose = {"lean": 0.25 if act < 0.15 else -0.15, "tilt": 0.0, "legs": [[-0.6, -0.1], [0.7, -0.6]], "arms": [[-0.6, 0.6], [a, 0.2]]}
+		elif kind == Kind.DROWNED and act > 0:
+			pose = Rig.CROUCH
+		elif kind == Kind.FORGED and act > 0:
+			pose = {"lean": -0.1, "tilt": 0.0, "legs": [[-0.5, -0.1], [0.6, -0.5]], "arms": [[-0.4, 0.5], [-2.6 + (0.45 - act) * 8, 0.3]]}
+		elif kind == Kind.SNUFFER:
+			var sw := 1.6 if act > 0 and act <= 0.1 else -2.4 if act > 0 else 0.4
+			pose = {"lean": 0.25 if act > 0 else 0.05, "tilt": -0.1, "legs": [[-0.45, -0.2], [0.5, -0.5]], "arms": [[-0.4, 0.6], [sw, 0.2]]}
 		elif kind == Kind.HEXER:
 			var raise := 1.0 if act > 0 else 0.0
 			pose = {"lean": 0.0, "tilt": -0.1, "legs": [[-0.2, 0.05], [0.25, -0.1]], "arms": [[-0.3 - raise * 2.4, 0.4], [0.4 + raise * 2.2, 0.3]]}
@@ -209,6 +296,17 @@ func _draw() -> void:
 			Rig.blade(self, hand, J.armF.can, 54, 0.0)
 			if act > 0.15:
 				draw_arc(Vector2(facing * 50, -30), 30, 0, TAU, 24, Color(0.9, 0.22, 0.23, 0.5 * (1 - act)), 3)
+		if kind == Kind.SNUFFER:
+			# a snuffer: a cone on a long pole
+			var hand: Vector2 = J.armF.e
+			var ang: float = J.armF.can
+			var dir := Vector2(cos(ang), sin(ang))
+			var tip := hand + dir * 50
+			draw_line(hand, tip, Color("#5a524c"), 2.5)
+			var n := dir.orthogonal()
+			draw_colored_polygon(PackedVector2Array([tip, tip + dir * 12 + n * 7, tip + dir * 12 - n * 7]), body)
+		if kind == Kind.FORGED:
+			draw_circle(Vector2(facing * 14, -36), 5, Color(1, 0.55, 0.36, 0.5))
 		if kind == Kind.HEXER and act > 0:
 			draw_circle(Vector2(facing * 10, -40 - 30), 6 + (0.5 - act) * 10, Color(0.7, 0.3, 1, 0.8))
 	if hp < max_hp:
