@@ -57,6 +57,9 @@ var best_depth := 0
 var wins := 0
 var sets_done: Array[String] = []
 var unlocked_vigil := 0
+# options, saved with the meta progress
+var opt_shake := true
+var opt_fullscreen := false
 
 # --smoke (used by CI): a bot mashes inputs, depths fly by, and the run is forced
 # through the boss, the hidden candle and a death, then the game quits.
@@ -119,6 +122,8 @@ func _ready() -> void:
 	if smoke:
 		depth_time = 2.0
 		print("smoke test: start")
+	_load_meta()
+	_apply_options()
 	start(0, not smoke)
 
 
@@ -173,7 +178,16 @@ func _smoke(dt: float) -> void:
 				open_pause()
 				var m = hud.menu
 				hud.menu = null
+				m.cb.call(1)
+				for k in 3:
+					# shake off, shake on, back to pause, then resume
+					m = hud.menu
+					hud.menu = null
+					m.cb.call([0, 0, 2][k])
+				m = hud.menu
+				hud.menu = null
 				m.cb.call(0)
+				print("smoke test: options ok, shake %s" % opt_shake)
 				hud.open_title(_smoke_title_ok)
 		3:
 			# every arena loads and runs briefly
@@ -275,6 +289,7 @@ func _begin() -> void:
 func open_pause() -> void:
 	var opts := [
 		{"id": "resume", "name": "RESUME", "desc": "Back into the dark.", "tag": ""},
+		{"id": "options", "name": "OPTIONS", "desc": "Screen shake and fullscreen.", "tag": ""},
 		{"id": "restart", "name": "RESTART", "desc": "Abandon this run. Wax you carry is lost.", "tag": ""},
 		{"id": "title", "name": "TITLE", "desc": "Abandon this run and return to the title.", "tag": ""},
 	]
@@ -287,6 +302,37 @@ func _pause_pick(i: int, opts: Array) -> void:
 			start(0)
 		"title":
 			start(0, true)
+		"options":
+			open_options()
+
+
+func open_options() -> void:
+	var opts := [
+		{"id": "shake", "name": "SHAKE %s" % ("ON" if opt_shake else "OFF"), "desc": "Screen shake on hits, slams and bosses.", "tag": "OPTION"},
+		{"id": "full", "name": "FULLSCREEN %s" % ("ON" if opt_fullscreen else "OFF"), "desc": "Fill the screen, or play in a window.", "tag": "OPTION"},
+		{"id": "back", "name": "BACK", "desc": "Return to the pause menu.", "tag": ""},
+	]
+	hud.open_choice("OPTIONS", "SAVED BETWEEN SESSIONS", opts, _option_pick.bind(opts))
+
+
+func _option_pick(i: int, opts: Array) -> void:
+	match opts[i].id:
+		"shake":
+			opt_shake = not opt_shake
+		"full":
+			opt_fullscreen = not opt_fullscreen
+			_apply_options()
+		"back":
+			open_pause()
+			return
+	_save_meta()
+	open_options()
+
+
+func _apply_options() -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if opt_fullscreen else DisplayServer.WINDOW_MODE_WINDOWED)
 
 
 ## Swaps the arena under a running game: chapters move the run to a new dungeon.
@@ -303,6 +349,7 @@ func _load_arena(i: int) -> void:
 	world.load_map("res://maps/%s.txt" % MAPS[i])
 	player.position = world.spawn
 	player.vel = Vector2.ZERO
+	player.reset_physics_interpolation()
 	lights = Node2D.new()
 	add_child(lights)
 	brazier_lights.clear()
@@ -450,6 +497,8 @@ func _load_meta() -> void:
 		vigil_max = cfg.get_value("meta", "vigil_max", 0)
 		best_depth = cfg.get_value("meta", "best_depth", 0)
 		wins = cfg.get_value("meta", "wins", 0)
+		opt_shake = cfg.get_value("options", "shake", true)
+		opt_fullscreen = cfg.get_value("options", "fullscreen", false)
 
 
 func _save_meta() -> void:
@@ -460,6 +509,8 @@ func _save_meta() -> void:
 	cfg.set_value("meta", "vigil_max", vigil_max)
 	cfg.set_value("meta", "best_depth", best_depth)
 	cfg.set_value("meta", "wins", wins)
+	cfg.set_value("options", "shake", opt_shake)
+	cfg.set_value("options", "fullscreen", opt_fullscreen)
 	cfg.save(SAVE_PATH)
 
 
@@ -575,6 +626,7 @@ func _spawn_boss() -> void:
 	boss.position = Vector2(x, y)
 	add_child(boss)
 	move_child(boss, world.get_index() + 1)
+	boss.reset_physics_interpolation()
 	enemies.append(boss)
 	shake(0.7, 18)
 	hitstop = 0.15
@@ -722,6 +774,7 @@ func _spawn() -> void:
 	e.position = at + (Vector2.ZERO if k == Enemy.Kind.GLOOMWING else Vector2(0, 18))
 	add_child(e)
 	move_child(e, world.get_index() + 1)
+	e.reset_physics_interpolation()
 	enemies.append(e)
 	fx.burst(at, 12, Color("#e5383b"), 140)
 
@@ -796,6 +849,8 @@ func _end_run() -> void:
 
 
 func shake(t: float, mag: float) -> void:
+	if not opt_shake:
+		return
 	shake_t = maxf(shake_t, t)
 	shake_mag = maxf(shake_mag, mag)
 

@@ -76,7 +76,8 @@ The name comes from an old church service where 15 candles on a triangular stand
 ## Notes
 
 - Maps are read with `FileAccess` from `res://maps`. For an exported build, add `maps/*.txt` to the export preset's non-resource include filter.
-- There's no render interpolation yet. At 120 Hz physics this is fine on 60 and 120 Hz screens; add interpolation before testing on 144 Hz or higher.
+- Physics interpolation is on (Godot 4.3), so movement stays smooth on 144 Hz and faster screens. Anything that teleports calls `reset_physics_interpolation()`.
+- The pause menu has Options: screen shake and fullscreen, saved to `user://tenebrae.cfg`.
 
 ## Playable browser build
 

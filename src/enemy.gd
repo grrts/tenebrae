@@ -222,6 +222,7 @@ func _snuffer(dt: float) -> void:
 			if not wd.is_solid(wd.cell(to.x), wd.cell(to.y - 20)) and wd.is_solid(wd.cell(to.x), wd.cell(to.y + 20)):
 				game.fx.burst(position + Vector2(0, -28), 10, Color("#b44dff"), 120)
 				position = to
+				reset_physics_interpolation()
 				vel = Vector2.ZERO
 				facing = 1 if p.position.x > position.x else -1
 				act = 0.5
