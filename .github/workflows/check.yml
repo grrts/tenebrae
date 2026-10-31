@@ -13,12 +13,15 @@ jobs:
         run: godot --headless --import 2>&1 | tee import.log
       - name: Run the main scene for 600 frames
         run: timeout 120 godot --headless --quit-after 600 2>&1 | tee run.log
+      - name: Smoke test (bot plays through depths, boss, revive, death and every map)
+        run: timeout 180 godot --headless -- --smoke 2>&1 | tee smoke.log
       - name: Fail on script errors
         run: |
           # each error and the line after it (the res:// location) become annotations,
           # so they can be read through the API without the raw log
-          if grep -nE -A1 "SCRIPT ERROR|Parse Error|Failed to load script|Invalid call|Invalid access|Invalid assignment" import.log run.log > errors.txt; then
+          if grep -nE -A1 "SCRIPT ERROR|Parse Error|Failed to load script|Invalid call|Invalid access|Invalid assignment" import.log run.log smoke.log > errors.txt; then
             head -c 60000 errors.txt | paste -sd'|' | fold -w 3500 | while read -r chunk; do echo "::error::$chunk"; done
             echo "Godot reported script errors"; exit 1
           fi
+          grep -q "smoke test: done" smoke.log || { echo "::error::smoke test did not finish: $(tail -c 2000 smoke.log | paste -sd'|')"; exit 1; }
           echo "No script errors"

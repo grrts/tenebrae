@@ -32,6 +32,12 @@ var depth_t := 0.0
 var hidden_candle := true
 var boss: Boss = null
 
+# --smoke (used by CI): a bot mashes inputs, depths fly by, and the run is forced
+# through the boss, the hidden candle and a death, then the game quits.
+var smoke := false
+var smoke_t := 0.0
+var smoke_held := ""
+
 var map_i := 1
 var hitstop := 0.0
 var dash_id := 0
@@ -79,7 +85,45 @@ func _ready() -> void:
 	hud = Hud.new()
 	hud.game = self
 	add_child(hud)
+	smoke = "--smoke" in OS.get_cmdline_user_args()
+	if smoke:
+		depth_time = 2.0
+		print("smoke test: start")
 	start(map_i)
+
+
+func _smoke(dt: float) -> void:
+	smoke_t += dt
+	var actions := ["left", "right", "jump", "attack", "dash", "down"]
+	for a in actions:
+		Input.action_release(a)
+	if smoke_held != "":
+		Input.action_press(smoke_held)
+	if randf() < dt * 2:
+		smoke_held = ["left", "right", ""][randi() % 3]
+	if randf() < dt * 6:
+		Input.action_press(actions[2 + randi() % 4])
+	if smoke_t < 14 and player.hp < 2:
+		player.hp = player.max_hp
+	if absf(smoke_t - 16) < dt and not player.dead:
+		print("smoke test: forcing hidden candle, then death")
+		player.hp = 1
+		player.invuln = 0
+		player.take_hit(player.position.x)
+	if absf(smoke_t - 19) < dt and not player.dead:
+		player.hp = 1
+		player.invuln = 0
+		player.dash = 0
+		player.take_hit(player.position.x)
+	if absf(smoke_t - 22) < dt:
+		print("smoke test: switching maps")
+		for i in MAPS.size():
+			start(i)
+			for k in 60:
+				_physics_process(1.0 / 120)
+	if smoke_t > 26:
+		print("smoke test: done, depth %d, kills %d" % [depth, kills])
+		get_tree().quit()
 
 
 ## Depth numbers read as Roman numerals, like psalm numbers in the service.
@@ -150,6 +194,8 @@ func start(i: int) -> void:
 
 
 func _physics_process(dt: float) -> void:
+	if smoke:
+		_smoke(dt)
 	if hitstop > 0:
 		hitstop -= dt
 		return
