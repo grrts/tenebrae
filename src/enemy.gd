@@ -37,6 +37,8 @@ var ph := 0.0
 var act := 0.0
 var act_cd := 1.5
 var dive_dir := Vector2.ZERO
+# "" or SWIFT (60% faster), SHIELDED (half damage from the front), VOLATILE (bursts on death)
+var elite := ""
 
 
 func setup(k: Kind, hp_mul: float) -> void:
@@ -52,9 +54,23 @@ func setup(k: Kind, hp_mul: float) -> void:
 	act_cd = randf_range(1.0, 2.5)
 
 
+## From depth III some enemies come as elites: more health, a gold ring and one twist.
+func make_elite(kind_name: String) -> void:
+	elite = kind_name
+	max_hp *= 2.2
+	hp = max_hp
+	scale_k *= 1.18
+	h *= 1.18
+	if elite == "SWIFT":
+		speed *= 1.6
+
+
 func _physics_process(dt: float) -> void:
 	if game == null or dead or game.hitstop > 0 or game.frozen:
 		return
+	if elite == "SWIFT":
+		# swift elites think faster too
+		act_cd = maxf(0, act_cd - dt * 0.6)
 	hit_t = maxf(0, hit_t - dt)
 	stun = maxf(0, stun - dt)
 	hop_cd = maxf(0, hop_cd - dt)
@@ -262,7 +278,11 @@ func _draw() -> void:
 		return
 	var body := Color(1, 1, 1) if hit_t > 0 else Rig.COL_SHADE
 	var rim := Color(0.9, 0.22, 0.23, 0.6)
-	var eyes: Color = {Kind.HEXER: Color("#b44dff"), Kind.SNUFFER: Color("#b44dff"), Kind.DROWNED: Color("#3fd6c4"), Kind.FORGED: Color("#ff8a5c")}.get(kind, Color("#e5383b"))
+	var gold := Color("#f2b43a")
+	if elite != "":
+		var pulse := 0.55 + 0.2 * sin(Time.get_ticks_msec() * 0.006 + ph)
+		draw_arc(Vector2(0, -2) if kind != Kind.GLOOMWING else Vector2(0, 14), 22, 0, TAU, 28, Color(gold, pulse), 2)
+	var eyes: Color = gold if elite != "" else {Kind.HEXER: Color("#b44dff"), Kind.SNUFFER: Color("#b44dff"), Kind.DROWNED: Color("#3fd6c4"), Kind.FORGED: Color("#ff8a5c")}.get(kind, Color("#e5383b"))
 	if kind == Kind.GLOOMWING:
 		_draw_wing(body, eyes)
 	else:
@@ -313,7 +333,13 @@ func _draw() -> void:
 	if hp < max_hp:
 		var top := -h / 2 - 14 if kind == Kind.GLOOMWING else -h - 12
 		draw_rect(Rect2(-16, top, 32, 4), Color(0, 0, 0, 0.8))
-		draw_rect(Rect2(-15, top + 1, 30 * clampf(hp / max_hp, 0, 1), 2), Color("#e5383b"))
+		draw_rect(Rect2(-15, top + 1, 30 * clampf(hp / max_hp, 0, 1), 2), Color("#f2b43a") if elite != "" else Color("#e5383b"))
+	if elite != "":
+		var top2 := -h / 2 - 22 if kind == Kind.GLOOMWING else -h - 20
+		var f := ThemeDB.fallback_font
+		var sw := f.get_string_size(elite, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+		draw_string_outline(f, Vector2(-sw / 2, top2), elite, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, 4, Color.BLACK)
+		draw_string(f, Vector2(-sw / 2, top2), elite, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("#f2b43a"))
 
 
 func _draw_wing(body: Color, eyes: Color) -> void:

@@ -69,6 +69,7 @@ var smoke_held := ""
 var smoke_map := 0
 var smoke_boss_t := 0.0
 var smoke_phase := 0
+var smoke_elites: Array[String] = []
 var smoke_p_t := 0.0
 
 var map_i := 1
@@ -771,6 +772,11 @@ func _spawn() -> void:
 	elif depth >= 5 and q < 0.64:
 		k = Enemy.Kind.BRUTE
 	e.setup(k, hp_mul() * (1.3 if has_rune("TALLOW CROWN") else 1.0))
+	if depth >= 3 and randf() < 0.04 + depth * 0.025:
+		e.make_elite(["SWIFT", "SHIELDED", "VOLATILE"][randi() % 3])
+		if smoke and not e.elite in smoke_elites:
+			smoke_elites.append(e.elite)
+			print("smoke test: first %s elite at depth %d" % [e.elite, depth])
 	e.position = at + (Vector2.ZERO if k == Enemy.Kind.GLOOMWING else Vector2(0, 18))
 	add_child(e)
 	move_child(e, world.get_index() + 1)
@@ -782,7 +788,10 @@ func _spawn() -> void:
 func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 	if e.dead:
 		return
-	e.hp -= dmg * damage_mul() * (1.6 if e == boss and has_rune("TALLOW CROWN") else 1.0)
+	var guard := 0.5 if e.elite == "SHIELDED" and kb.x != 0 and signf(kb.x) == -e.facing else 1.0
+	if guard < 1:
+		fx.spark(e.position + Vector2(e.facing * 16, -30))
+	e.hp -= dmg * damage_mul() * guard * (1.6 if e == boss and has_rune("TALLOW CROWN") else 1.0)
 	e.knock(kb)
 	hitstop = maxf(hitstop, 0.05)
 	shake(0.1, 5)
@@ -792,7 +801,13 @@ func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 		kills += 1
 		fx.burst(e.position + Vector2(0, -28), 18, Color("#0a0a0d"), 260)
 		e.visible = false
-		_drop_wax(e.position + Vector2(0, -28), 26 if e == boss else (4 if e.kind == Enemy.Kind.BRUTE else 2))
+		_drop_wax(e.position + Vector2(0, -28), 26 if e == boss else (4 if e.kind == Enemy.Kind.BRUTE else 2) * (3 if e.elite != "" else 1))
+		if e.elite == "VOLATILE":
+			fx.ring(e.position + Vector2(0, -20), 90, Color("#ff8a5c"))
+			fx.burst(e.position + Vector2(0, -20), 20, Color("#ff8a5c"), 240)
+			shake(0.2, 8)
+			if e.position.distance_to(player.position) < 90:
+				player.take_hit(e.position.x)
 		if has_rune("SECOND WIND"):
 			player.dash_cd = 0
 			player.air_dash_used = false
