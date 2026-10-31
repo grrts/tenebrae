@@ -160,7 +160,7 @@ func start(i: int) -> void:
 		lights.queue_free()
 	for n in [fx, dbg, camera, hex_layer]:
 		if n.get_parent():
-			remove_child(n)
+			n.get_parent().remove_child(n)
 	world.load_map("res://maps/%s.txt" % MAPS[i])
 	player = Player.new()
 	player.game = self
