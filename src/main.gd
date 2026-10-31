@@ -61,6 +61,9 @@ var achieved: Array = []
 var elite_kills := 0
 var run_braziers := 0
 var boss_untouched := false
+# playtest log: every rune offered, so pick rates can be measured
+var offered: Array = []
+const RUNS_PATH := "user://runs.jsonl"
 # options, saved with the meta progress
 var opt_shake := 1.0 ## 1, 0.5 or 0
 var opt_fullscreen := false
@@ -270,6 +273,7 @@ func start(i: int, show_title := false) -> void:
 	won = false
 	runes.clear()
 	sets_done.clear()
+	offered.clear()
 	run_braziers = 0
 	lvl = 1
 	xp = 0
@@ -445,6 +449,24 @@ func unlock(id: String) -> void:
 		print("smoke test: achievement %s" % id)
 
 
+## One JSON line per run in user://runs.jsonl. tools/runs_report.py turns a folder of these into the playtest numbers.
+func _log_run() -> void:
+	var rec := {
+		"at": Time.get_datetime_string_from_system(), "build": ProjectSettings.get_setting("application/config/version", "dev"),
+		"won": won, "depth": depth, "time": snappedf(run_time, 0.1), "kills": kills, "bosses": bosses,
+		"weapon": weapon, "runes": runes, "offered": offered, "lvl": lvl, "wax": run_wax, "vigil": vigil,
+		"revived": not hidden_candle and vigil < 3, "assist": opt_speed < 1.0 or opt_hearts, "smoke": smoke,
+	}
+	var f := FileAccess.open(RUNS_PATH, FileAccess.READ_WRITE if FileAccess.file_exists(RUNS_PATH) else FileAccess.WRITE)
+	if f == null:
+		return
+	f.seek_end()
+	f.store_line(JSON.stringify(rec))
+	f.close()
+	if smoke:
+		print("smoke test: run logged, won %s, depth %d" % [won, depth])
+
+
 func on_player_hit() -> void:
 	boss_untouched = false
 
@@ -480,6 +502,8 @@ func _open_draft() -> void:
 		opts.append({"id": k, "name": k, "desc": rd.desc, "tag": "%s · %s" % [rd.sig, rd.rar.to_upper()], "col": RunData.RARITY_COL[rd.rar]})
 	if opts.is_empty():
 		return
+	for o in opts:
+		offered.append(o.id)
 	hud.open_choice("LEVEL %d · DRAFT A RUNE" % lvl, "RUNES CHANGE HOW YOUR MOVES WORK", opts, func(i): _take_rune(opts[i].id))
 
 
@@ -926,6 +950,7 @@ func on_player_dead() -> void:
 
 func _end_run() -> void:
 	Engine.time_scale = opt_speed
+	_log_run()
 	var kept := (run_wax if won else roundi(run_wax * 0.4)) + bosses * 50
 	var before := earned
 	bank += kept

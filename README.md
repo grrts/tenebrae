@@ -44,6 +44,10 @@ Open the folder in **Godot 4.3** (or newer 4.x) and press F5. The whole scene is
 - **Death:** souls-like. The world slows and drains, the Wick crumbles into embers, and **EXTINGUISHED** fades in. 40% of your wax (plus 50 per boss) is banked to `user://tenebrae.cfg`, then a new run.
 - **Victory:** beat Saint Umber at depth XVI to see the finale and **THE DAWN RETURNS**. A won run keeps all its wax.
 
+## Playtest numbers
+
+Every run appends one line to `user://runs.jsonl` (depth, time, win, weapon, runes picked and offered, Vigil, assists). Collect testers' files and run `python3 tools/runs_report.py <folder>` for deaths by depth, boss reach, rune pick rates and weapon win rates: the numbers the plan's playtesting section tracks.
+
 ## Achievements
 
 Twelve achievements live in `src/achievements.gd` (bosses, the dawn, a win without the hidden candle, Vigil V, an untouched boss, sets, cursed runes, braziers and elites). They are saved to `user://tenebrae.cfg`, pop up as a toast, and are counted on the title screen. Their ids are the Steamworks API names, so the Steam build only needs a `SetAchievement(id)` call in `Game.unlock()`.
