@@ -48,6 +48,8 @@ var run_time := 0.0
 var pickups: Array = []
 # meta, saved between sessions
 const SAVE_PATH := "user://wickbearer.cfg"
+# bump when the save layout changes; _load_meta migrates older saves
+const SAVE_VERSION := 2
 var bank := 0
 var earned := 0
 var seen: Array = []
@@ -212,6 +214,20 @@ func _smoke(dt: float) -> void:
 					if buy_relic(i):
 						bought += 1
 				print("smoke test: reliquary bought %d relics" % bought)
+				# a save damaged mid-write must come back from the backup
+				_save_meta()
+				_save_meta()
+				var keep := bank
+				var bad := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+				bad.store_string("[meta\nbank=%%% not a save")
+				bad.close()
+				bank = 0
+				_load_meta()
+				if bank != keep:
+					print("smoke test: FAILED, corrupt save lost the bank (%d, expected %d)" % [bank, keep])
+					get_tree().quit(1)
+					return
+				print("smoke test: corrupt save recovered from backup, bank %d" % bank)
 				for w in RunData.SKILLS:
 					_equip(w)
 					skill_meter = 1.0
@@ -743,29 +759,40 @@ func _buy(o: Dictionary) -> void:
 
 func _load_meta() -> void:
 	var cfg := ConfigFile.new()
-	if cfg.load(SAVE_PATH) == OK:
-		bank = cfg.get_value("meta", "bank", 0)
-		earned = cfg.get_value("meta", "earned", 0)
-		seen = cfg.get_value("story", "seen", [])
-		vigil_max = cfg.get_value("meta", "vigil_max", 0)
-		best_depth = cfg.get_value("meta", "best_depth", 0)
-		wins = cfg.get_value("meta", "wins", 0)
-		achieved = cfg.get_value("achievements", "unlocked", [])
-		codex = cfg.get_value("meta", "codex", [])
-		relics = cfg.get_value("meta", "relics", [])
+	# a save cut off mid-write or hand-edited into garbage falls back to the last good copy
+	var ok := cfg.load(SAVE_PATH) == OK
+	if not ok and FileAccess.file_exists(SAVE_PATH + ".bak"):
+		cfg = ConfigFile.new()
+		ok = cfg.load(SAVE_PATH + ".bak") == OK
+		if ok:
+			push_warning("save: %s unreadable, loaded the backup" % SAVE_PATH)
+	if ok:
+		bank = _cfg_int(cfg, "meta", "bank", 0)
+		earned = _cfg_int(cfg, "meta", "earned", 0)
+		seen = _cfg_arr(cfg, "story", "seen", [])
+		vigil_max = _cfg_int(cfg, "meta", "vigil_max", 0)
+		best_depth = _cfg_int(cfg, "meta", "best_depth", 0)
+		wins = _cfg_int(cfg, "meta", "wins", 0)
+		achieved = _cfg_arr(cfg, "achievements", "unlocked", [])
+		codex = _cfg_arr(cfg, "meta", "codex", [])
+		relics = _cfg_arr(cfg, "meta", "relics", [])
 		if earned >= 400 and not "sickle" in relics:
 			# saves from before the Reliquary unlocked the sickle at 400 earned
 			relics.append("sickle")
-		elite_kills = cfg.get_value("achievements", "elite_kills", 0)
+		elite_kills = _cfg_int(cfg, "achievements", "elite_kills", 0)
 		var sh = cfg.get_value("options", "shake", 1.0)
-		opt_shake = (1.0 if sh else 0.0) if typeof(sh) == TYPE_BOOL else float(sh)
-		opt_fullscreen = cfg.get_value("options", "fullscreen", false)
-		opt_flashes = cfg.get_value("options", "flashes", true)
-		opt_hitstop = cfg.get_value("options", "hitstop", true)
-		opt_speed = cfg.get_value("options", "speed", 1.0)
-		opt_hearts = cfg.get_value("options", "hearts", false)
-		opt_up_jump = cfg.get_value("controls", "up_jump", true)
-		binds = cfg.get_value("controls", "binds", {})
+		opt_shake = (1.0 if sh else 0.0) if typeof(sh) == TYPE_BOOL else (clampf(float(sh), 0.0, 1.0) if typeof(sh) in [TYPE_INT, TYPE_FLOAT] else 1.0)
+		opt_fullscreen = _cfg_bool(cfg, "options", "fullscreen", false)
+		opt_flashes = _cfg_bool(cfg, "options", "flashes", true)
+		opt_hitstop = _cfg_bool(cfg, "options", "hitstop", true)
+		opt_speed = _cfg_float(cfg, "options", "speed", 1.0)
+		opt_hearts = _cfg_bool(cfg, "options", "hearts", false)
+		opt_up_jump = _cfg_bool(cfg, "controls", "up_jump", true)
+		binds = _cfg_dict(cfg, "controls", "binds", {})
+		# keep hand-edited or damaged values inside what the game can use
+		bank = maxi(0, bank)
+		vigil_max = clampi(vigil_max, 0, RunData.VIGILS.size() - 1)
+		opt_speed = clampf(opt_speed, 0.5, 1.0)
 		_setup_input()
 
 
@@ -789,7 +816,47 @@ func _save_meta() -> void:
 	cfg.set_value("options", "hearts", opt_hearts)
 	cfg.set_value("controls", "up_jump", opt_up_jump)
 	cfg.set_value("controls", "binds", binds)
-	cfg.save(SAVE_PATH)
+	cfg.set_value("meta", "save_version", SAVE_VERSION)
+	# write to a temp file first, keep the previous save as .bak, then swap in the new one,
+	# so a crash or power cut mid-write never leaves an empty save
+	var tmp := SAVE_PATH + ".tmp"
+	if cfg.save(tmp) != OK:
+		push_warning("save: could not write %s" % tmp)
+		return
+	var dir := DirAccess.open("user://")
+	if dir == null:
+		return
+	var file := SAVE_PATH.get_file()
+	if dir.file_exists(file):
+		if dir.file_exists(file + ".bak"):
+			dir.remove(file + ".bak")
+		dir.rename(file, file + ".bak")
+	dir.rename(file + ".tmp", file)
+
+
+func _cfg_int(cfg: ConfigFile, sec: String, key: String, dflt: int) -> int:
+	var v = cfg.get_value(sec, key, dflt)
+	return int(v) if typeof(v) in [TYPE_INT, TYPE_FLOAT, TYPE_BOOL] else dflt
+
+
+func _cfg_float(cfg: ConfigFile, sec: String, key: String, dflt: float) -> float:
+	var v = cfg.get_value(sec, key, dflt)
+	return float(v) if typeof(v) in [TYPE_INT, TYPE_FLOAT] else dflt
+
+
+func _cfg_bool(cfg: ConfigFile, sec: String, key: String, dflt: bool) -> bool:
+	var v = cfg.get_value(sec, key, dflt)
+	return bool(v) if typeof(v) in [TYPE_INT, TYPE_FLOAT, TYPE_BOOL] else dflt
+
+
+func _cfg_arr(cfg: ConfigFile, sec: String, key: String, dflt: Array) -> Array:
+	var v = cfg.get_value(sec, key, dflt)
+	return v if typeof(v) == TYPE_ARRAY else dflt.duplicate()
+
+
+func _cfg_dict(cfg: ConfigFile, sec: String, key: String, dflt: Dictionary) -> Dictionary:
+	var v = cfg.get_value(sec, key, dflt)
+	return v if typeof(v) == TYPE_DICTIONARY else dflt.duplicate()
 
 
 func _drop_wax(at: Vector2, n: int) -> void:
