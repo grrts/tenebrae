@@ -1829,6 +1829,12 @@ const AI = (() => {
     if (e.hit > 0 && e.type !== 'br') { if (e.mode && e.mode !== 'vault') e.mode = null; e.tele = 0; return false; }   // a hit staggers them
     if (e.mode) return act(st, e, p, dx, dy, dt, sm, hit, l);
     if (e.type === 'sp') return hexer(st, e, p, dx, dy, dt, sm, l);
+    // snuffers at the Throne feint: if you turn to face the blink, they blink again to your back
+    if (e.type === 'sn' && e.act > .2 && !e.feint && st.depth >= 13 && Math.sign(e.x - p.x) === p.f && Math.random() < dt * 6) {
+      const tx = p.x - p.f * 70; e.feint = 1;
+      if (floorAt(tx, p.y) && !wallAt(tx, p.y - 20)) { sparks(st.P, e.x, e.y - 28, 1, 10, C.violet); e.x = tx; e.y = p.y; e.vy = 0; e.f = -p.f; e.act = .45; sparks(st.P, e.x, e.y - 28, 1, 10, C.violet); }
+    }
+    if (e.type === 'sn' && !(e.act > 0)) e.feint = 0;
     if (!e.ground || e.act > 0) return false;                                // in the air, or the dungeon brain is mid-move
 
     // sidestep the player's swing: read it in the first moments of the attack
@@ -1956,7 +1962,11 @@ const AI = (() => {
       e.px = e.x; e.py = e.y;
       return true;
     }
-    if (e.diveCd <= 0 && Math.hypot(e.x - p.x, e.y - p.y + 40) < 230 && busy(st) < tokens(st) + 1 && !wallAt((e.x + p.x) / 2, (e.y + p.y - 40) / 2)) { e.tele = e.teleMax = .32; return true; }
+    if (e.diveCd <= 0 && Math.hypot(e.x - p.x, e.y - p.y + 40) < 230 && busy(st) < tokens(st) + 1 && !wallAt((e.x + p.x) / 2, (e.y + p.y - 40) / 2)) {
+      e.tele = e.teleMax = .32;
+      // the rest of the flock joins in, a beat apart
+      let n = 0; for (const o of st.E) if (o !== e && o.type === 'bat' && !o.dead && !(o.tele > 0) && !(o.dive > 0) && n < 2 && Math.hypot(o.x - e.x, o.y - e.y) < 240 && st.depth >= 4) { o.tele = o.teleMax = .32 + .14 * ++n; o.diveCd = 0; }
+      return true; }
     return false;
   }
   // hover target offset: behind the player, each bat on its own slot
@@ -1968,7 +1978,7 @@ const AI = (() => {
   function bossPick(st, e, p, dx, dy, rage) {
     const i = e.look || 0, adx = Math.abs(dx), o = [];
     if (adx < 90 && dy < -70) return 'upper';                                 // no standing on its head
-    if (i === 0) { o.push(['smash', 1.4]); if (adx < 240) o.push(['sweep', 2.2]); if (rage) o.push(['leap', .8]); }
+    if (i === 0) { o.push(['smash', 1.4]); if (adx < 240) o.push(['sweep', 2.2]); if (rage) o.push(['leap', .8]); if (adx > 220 && adx < 440 && Math.abs(dy) < 50) o.push(['pull', 2.4]); }
     if (i === 1) { o.push(['leap', 2.6], ['smash', 1]); if (rage) o.push(['rain', 1.4]); }
     if (i === 2) { o.push(['smash', 1.2]); if (adx > 170) o.push(['dash', 2.8]); if (rage) o.push(['leap', 1.2]); if (adx < 200) o.push(['sweep', 1]); }
     if (i === 3) { o.push(['leap', 1.8], ['rain', 1.5], ['smash', .7]); if (Math.abs(dy) < 40) o.push(['blink', 2.4]); }
@@ -1977,7 +1987,7 @@ const AI = (() => {
     for (const q of o) if ((r -= q[1]) <= 0) return q[0];
     return 'smash';
   }
-  const WIND = { smash: .75, sweep: .55, leap: .45, dash: .6, slash: .4, rain: .6, upper: .32, blink: .2 };
+  const WIND = { pull: .55, smash: .75, sweep: .55, leap: .45, dash: .6, slash: .4, rain: .6, upper: .32, blink: .2 };
   function bwind(e, kind, rage) { e.ai = 'wind'; e.next = kind; e.at = e.windT = WIND[kind] * (rage ? .72 : 1); }
 
   function boss(st, e, p, dt, sm, hit) {
@@ -1985,14 +1995,13 @@ const AI = (() => {
     const bd = 1 + (st.depth >= 8 ? 1 : 0);
     e.at -= dt;
     if (e.ground && !e.landed) { e.landed = 1; st.shake = .45; st.rings.push({ x: e.x, y: e.y, t: 0, kind: 'slam', big: 1 }); }
+    // at half health it roars and calls its dungeon's dead to fight beside it
+    if (rage && !e.called && e.ground && (e.ai === 'walk' || e.ai === 'smash')) { e.called = 1; callAdds(st, e); }
     if (e.ai === 'walk') {
       e.f = Math.sign(dx) || 1;
       const want = adx < 70 ? 0 : e.f * BOSS[i].walk * sm * (rage ? 1.25 : 1);
       e.vx = lerp(e.vx, want, Math.min(1, dt * 3));
-      if (e.at <= 0 && e.ground) { const k = bossPick(st, e, p, dx, dy, rage); e.last = k; bwind(e, k, rage);
-        if (k === 'leap') { const T = 2 * 900 / GRV; e.tx = clamp(p.x + p.vx * T * (.5 + .4 * l), 60, DA.w - 60); e.ty = e.y; }
-        if (k === 'rain') { const n = rage ? 7 : 5, c = p.x + clamp(p.vx * .5, -160, 160); e.ry = p.y; e.rx = []; for (let k2 = 0; k2 < n; k2++) e.rx.push(clamp(c + (k2 - (n - 1) / 2) * 68, 40, DA.w - 40)); }
-      }
+      if (e.at <= 0 && e.ground) startMove(st, e, p, bossPick(st, e, p, dx, dy, rage), rage, l);
     } else if (e.ai === 'wind') {
       e.vx *= Math.max(0, 1 - dt * 10);
       if (e.next === 'sweep' || e.next === 'upper' || e.next === 'smash') { if (e.at > e.windT * .5) e.f = Math.sign(dx) || e.f; }
@@ -2006,14 +2015,39 @@ const AI = (() => {
         if (Math.abs(p.x - e.x) < 120 && Math.abs(p.y - e.y) < 70) hit(bd);
         if (i === 3 || (i === 1 && rage)) { const n = rage ? 5 : 3; for (let k = 0; k < n; k++) lob(st, e.x, e.y - 120, p.x + (k - (n - 1) / 2) * 90 + clamp(p.vx * .5, -120, 120), p.y - 28, .9); }
       }
+    } else if (e.ai === 'pull') {
+      // the chain runs out along the floor; whoever it catches is dragged in for a smash
+      e.cx += e.f * 1100 * dt; e.vx = 0;
+      if (Math.random() < .9) sparks(st.P, e.cx, e.y - 30, .5, 1, '#c9c2b8');
+      if (!e.caught && p.dash <= 0 && p.hurt <= 0 && Math.abs(p.x - e.cx) < 30 && p.y - 56 < e.y - 10 && p.y > e.y - 80) {
+        e.caught = 1; p.vx = Math.sign(e.x - p.x) * 760; p.vy = -260; p.ground = false; p.kick = .3; p.atk = null; st.shake = .25;
+      }
+      if (e.caught || Math.abs(e.cx - e.x) > 460 || wallAt(e.cx, e.y - 30)) { if (e.caught) { bwind(e, 'smash', true); e.at = e.windT = .32; } else { e.ai = 'smash'; e.at = .45; } }
     } else if (e.ai === 'dash') {
       e.vx = e.f * 940; if (Math.random() < .8) sparks(st.P, e.x - e.f * 20, e.y - 40, .8, 2);
       if (body(p, e.x - 30, e.x + 30, e.y - 120, e.y)) hit(bd);
       if (e.at <= 0 || e.wall === e.f || e.x < 70 || e.x > DA.w - 70) { e.vx = e.f * 120; e.ai = 'smash'; e.at = .7; st.shake = .2; }
     } else if (e.ai === 'smash' && e.at <= 0) {
       if (e.chain > 0) { e.chain--; e.chained = true; bwind(e, 'smash', true); e.at = e.windT = .38; }
-      else { e.ai = 'walk'; e.at = (rage ? rnd(.7, 1.2) : rnd(1.1, 1.8)) - .3 * l; }
+      // below a quarter health it stops walking between moves and strings them together
+      else if (e.hp < e.mhp / 4 && e.ground && !e.combo && Math.random() < .65) { e.combo = 1; startMove(st, e, p, bossPick(st, e, p, dx, dy, true), true, l); }
+      else { e.combo = 0; e.ai = 'walk'; e.at = (rage ? rnd(.7, 1.2) : rnd(1.1, 1.8)) - .3 * l; }
     }
+  }
+
+  function startMove(st, e, p, k, rage, l) {
+    e.last = k; bwind(e, k, rage);
+    if (k === 'leap') { const T = 2 * 900 / GRV; e.tx = clamp(p.x + p.vx * T * (.5 + .4 * l), 60, DA.w - 60); e.ty = e.y; }
+    if (k === 'rain') { const n = rage ? 7 : 5, c = p.x + clamp(p.vx * .5, -160, 160); e.ry = p.y; e.rx = []; for (let k2 = 0; k2 < n; k2++) e.rx.push(clamp(c + (k2 - (n - 1) / 2) * 68, 40, DA.w - 40)); }
+  }
+  const ADD = [['sh', 3, 52], ['dr', 4, 50], ['fg', 4, 56], ['sn', 3, 56]];
+  function callAdds(st, e) {
+    const [type, hp0, h] = ADD[e.look || 0], hp = hp0 * hpMul(st.depth);
+    st.shake = .5; st.rings.push({ x: e.x, y: e.y - 60, t: 0, kind: 'slam', big: 1, red: 1 });
+    st.banner = { text: 'IT CALLS ITS DEAD', sub: 'THE BOSS IS ENRAGED', t: 1.6, col: C.crimson };
+    for (const sd of [-1, 1]) { const x = clamp(e.x + sd * 170, 60, DA.w - 60); if (!floorAt(x, e.y) || wallAt(x, e.y - 30)) continue;
+      sparks(st.P, x, e.y - 30, 1.2, 14, C.crimson);
+      st.E.push({ type, elite: null, x, y: e.y, vx: 0, vy: 0, hp, mhp: hp, o: rnd(0, 20), f: -sd, hit: 0, ground: true, sc: 1, w: 18, h, shoot: rnd(1, 2), plat: null, burnT: 0, aiCd: .8 }); }
   }
 
   function bossDo(st, e, p, dx, dy, rage, bd, hit) {
@@ -2049,7 +2083,8 @@ const AI = (() => {
     } else if (k === 'rain') {
       e.ai = 'smash'; e.at = .8;
       for (const x of e.rx || []) { let y = p.y - 380; while (y < p.y - 80 && wallAt(x, y)) y += TS; st.proj.push({ x, y: Math.max(30, y), vx: 0, vy: 40, life: 3 }); }
-    } else { e.ai = 'walk'; e.at = 1; }
+    } else if (k === 'pull') { e.ai = 'pull'; e.cx = e.x + e.f * 30; e.caught = 0; e.f = Math.sign(dx) || e.f; }
+    else { e.ai = 'walk'; e.at = 1; }
   }
 
   // ---- danger markers for every wind-up ----
@@ -2069,6 +2104,7 @@ const AI = (() => {
         const kk = clamp(1 - e.at / (e.windT || .75), 0, 1), a = .18 + .34 * kk, red = `rgba(229,56,59,${a})`;
         ctx.fillStyle = red; ctx.strokeStyle = `rgba(255,90,80,${a + .2})`; ctx.lineWidth = 2;
         if (e.next === 'sweep') for (const sd of (e.hp < e.mhp / 2 ? [-1, 1] : [e.f])) ctx.fillRect(Math.min(e.x, e.x + sd * 250), e.y - 54, 250, 54);
+        if (e.next === 'pull') ctx.fillRect(Math.min(e.x, e.x + e.f * 460), e.y - 80, 460, 70 * kk);
         if (e.next === 'slash') ctx.fillRect(Math.min(e.x, e.x + e.f * 160), e.y - 130, 160, 130);
         if (e.next === 'upper') ctx.fillRect(e.x - 80, e.y - 300, 160, 300);
         if (e.next === 'dash') ctx.fillRect(Math.min(e.x, e.x + e.f * 520), e.y - 110, 520, 110 * kk);
@@ -2076,6 +2112,7 @@ const AI = (() => {
         if (e.next === 'leap' && e.tx != null) { ctx.beginPath(); ctx.ellipse(e.tx, e.y - 2, 120 * (.4 + .6 * kk), 12, 0, 0, TAU); ctx.fill(); ctx.stroke(); }
         if (e.next === 'rain' && e.rx) for (const x of e.rx) { ctx.beginPath(); ctx.ellipse(x, (e.ry ?? st.p.y) - 2, 18, 5, 0, 0, TAU); ctx.fill(); }
       }
+      if (e.type === 'boss' && e.ai === 'pull') { ctx.strokeStyle = 'rgba(201,194,184,.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(e.x + e.f * 20, e.y - 70); ctx.lineTo(e.cx, e.y - 30); ctx.stroke(); ctx.fillStyle = '#c9c2b8'; circ(ctx, e.cx, e.y - 30, 7); }
       if (e.type === 'boss' && e.ai === 'leap' && e.tx != null) { ctx.fillStyle = 'rgba(229,56,59,.3)'; ctx.beginPath(); ctx.ellipse(e.tx, (e.ty ?? FLOOR) - 2, 120, 12, 0, 0, TAU); ctx.fill(); }
     }
     ctx.restore();
