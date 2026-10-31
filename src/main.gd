@@ -1023,7 +1023,7 @@ func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 		var was_ready := skill_meter >= 1.0
 		skill_meter = minf(1.0, skill_meter + (0.05 if e == boss else 0.07))
 		if not was_ready and skill_meter >= 1.0:
-			hud.show_banner("%s READY" % RunData.SKILLS[weapon].name, "PRESS L, Q OR Y", 1.0)
+			hud.show_banner("%s READY" % RunData.SKILLS[weapon].name, "PRESS %s" % hud.btn("skill"), 1.0)
 	e.hp -= dmg * damage_mul() * guard * (1.6 if e == boss and has_rune("TALLOW CROWN") else 1.0)
 	e.knock(kb)
 	hitstop = maxf(hitstop, 0.05)

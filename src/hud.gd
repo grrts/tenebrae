@@ -23,6 +23,11 @@ var title_screen = null
 var reliquary = null
 # the Codex screen over the title: {pick, t}
 var codex = null
+# true after the last input came from a gamepad, so prompts show pad buttons
+var pad := false
+
+const PAD_NAMES := {"jump": "A", "attack": "X", "dash": "RB", "pause": "START", "skill": "Y", "cancel": "B"}
+const KEY_NAMES := {"jump": "SPACE", "attack": "J", "dash": "SHIFT", "pause": "ESC", "skill": "L", "cancel": "ESC"}
 # achievement toasts: [{name, t}]
 var toasts: Array = []
 var hp_show := 1.0
@@ -89,6 +94,20 @@ func show_banner(text: String, sub: String, t := 1.6) -> void:
 	banner = text
 	banner_sub = sub
 	banner_t = t
+
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventJoypadButton and event.pressed:
+		pad = true
+	elif event is InputEventJoypadMotion and absf(event.axis_value) > 0.5:
+		pad = true
+	elif event is InputEventKey or event is InputEventMouseButton:
+		pad = false
+
+
+## The on-screen name of the button for an action, for whichever device was used last.
+func btn(action: String) -> String:
+	return PAD_NAMES[action] if pad else KEY_NAMES[action]
 
 
 func _process(dt: float) -> void:
@@ -250,10 +269,10 @@ func _paint_title(vp: Vector2) -> void:
 	var stats := "BANKED ASH %d   ·   DEEPEST %s   ·   DAWNS %d" % [game.bank, Game.roman(maxi(1, game.best_depth)), game.wins]
 	_text(stats + "   ·   ACHIEVEMENTS %d / %d" % [game.achieved.size(), Achievements.LIST.size()], Vector2(mid.x, vp.y - 110), 13, Color(0.6, 0.57, 0.54), true)
 	var blink := 0.5 + 0.5 * sin(t * 4)
-	_text("PRESS SPACE OR J TO DESCEND", Vector2(mid.x, vp.y - 70), 16, Color(0.95, 0.92, 0.88, 0.4 + 0.6 * blink), true)
+	_text("PRESS %s TO DESCEND" % btn("jump"), Vector2(mid.x, vp.y - 70), 16, Color(0.95, 0.92, 0.88, 0.4 + 0.6 * blink), true)
 	var open := RunData.RELICS.filter(func(r): return not r.id in game.relics).size()
-	var rq := "SHIFT / K / RB  THE RELIQUARY  ·  %d TO BUY" % open if open > 0 else "THE RELIQUARY IS COMPLETE"
-	var cx := "L / Q / Y  THE CODEX  ·  %d / %d" % [game.codex.size(), Codex.ENTRIES.size()]
+	var rq := "%s  THE RELIQUARY  ·  %d TO BUY" % [btn("dash"), open] if open > 0 else "THE RELIQUARY IS COMPLETE"
+	var cx := "%s  THE CODEX  ·  %d / %d" % [btn("skill"), game.codex.size(), Codex.ENTRIES.size()]
 	_text(rq + "      " + cx, Vector2(mid.x, vp.y - 44), 12, Color("#3fd6c4"), true)
 
 
@@ -301,7 +320,7 @@ func _paint_codex(vp: Vector2) -> void:
 	else:
 		_text("This page is still dark.", Vector2(bx + 24, 164), 18, Color(0.5, 0.46, 0.43))
 		_text("Keep descending.", Vector2(bx + 24, 192), 14, Color(0.4, 0.37, 0.35))
-	_text("UP / DOWN  CHOOSE      SHIFT / ESC  BACK", Vector2(mid.x, vp.y - 30), 12, Color(0.55, 0.5, 0.47), true)
+	_text("UP / DOWN  CHOOSE      %s  BACK" % btn("dash"), Vector2(mid.x, vp.y - 30), 12, Color(0.55, 0.5, 0.47), true)
 
 
 func _step_reliquary(dt: float) -> void:
@@ -350,7 +369,7 @@ func _paint_reliquary(vp: Vector2) -> void:
 		_text("OWNED" if owned else "%d ASH" % rel.cost, Vector2(x0 + 650, y + 26), 13, Color("#3fd6c4") if owned else (Color("#f2b43a") if can else Color(0.5, 0.45, 0.4)))
 	if r.msg_t > 0:
 		_text(r.msg, Vector2(mid.x, vp.y - 70), 20, Color("#f2b43a"), true)
-	_text("UP / DOWN  CHOOSE      SPACE / J  BUY      SHIFT / ESC  BACK", Vector2(mid.x, vp.y - 30), 12, Color(0.55, 0.5, 0.47), true)
+	_text("UP / DOWN  CHOOSE      %s  BUY      %s  BACK" % [btn("jump"), btn("dash")], Vector2(mid.x, vp.y - 30), 12, Color(0.55, 0.5, 0.47), true)
 
 
 ## Souls-like death: a black band fades in and EXTINGUISHED slowly grows in it.
@@ -415,7 +434,7 @@ func _paint_scene(vp: Vector2) -> void:
 		var lines := _wrap(String(c.text), minf(760, vp.x - 80), 22)
 		for i in lines.size():
 			_text(lines[i], Vector2(mid.x, y + i * 32), 22, Color(0.92, 0.88, 0.84, a), true)
-	_text("SPACE / J  NEXT      ESC  SKIP", Vector2(vp.x - 130, vp.y - 30), 11, Color(0.55, 0.5, 0.47), true)
+	_text("%s  NEXT      %s  SKIP" % [btn("jump"), btn("cancel")], Vector2(vp.x - 130, vp.y - 30), 11, Color(0.55, 0.5, 0.47), true)
 
 
 func _paint_menu(vp: Vector2) -> void:
@@ -445,7 +464,7 @@ func _paint_menu(vp: Vector2) -> void:
 				line = ""
 			line += " " + wd
 		_text(line.strip_edges(), Vector2(r.position.x + cw / 2, y), 15, Color(0.85, 0.8, 0.75), true)
-	_text("LEFT / RIGHT  CHOOSE      SPACE / J  CONFIRM", Vector2(vp.x / 2, 500), 13, Color(0.5, 0.47, 0.44), true)
+	_text("LEFT / RIGHT  CHOOSE      %s  CONFIRM" % btn("jump"), Vector2(vp.x / 2, 500), 13, Color(0.5, 0.47, 0.44), true)
 
 
 func _paint_summary(vp: Vector2) -> void:
@@ -462,7 +481,7 @@ func _paint_summary(vp: Vector2) -> void:
 	if s.unlocked != "":
 		_text("UNLOCKED · %s" % s.unlocked, Vector2(vp.x / 2, 380), 30, Color("#f2b43a"), true)
 	if s.t > 1.2:
-		_text("PRESS SPACE OR J TO RELIGHT THE CANDLES", Vector2(vp.x / 2, vp.y - 60), 14, Color(0.6, 0.57, 0.54), true)
+		_text("PRESS %s TO RELIGHT THE CANDLES" % btn("jump"), Vector2(vp.x / 2, vp.y - 60), 14, Color(0.6, 0.57, 0.54), true)
 
 
 func _hearse(o: Vector2) -> void:
