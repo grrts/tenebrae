@@ -1,0 +1,8 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Cormorant+Garamond:ital,wght@1,500&display=block" rel="stylesheet">
+<style>html,body{margin:0;width:1280px;height:720px;background:#030203;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
+.t{font-family:Cinzel,serif;font-weight:900;color:#f3ebe0;letter-spacing:.08em;text-shadow:0 0 22px rgba(255,150,60,.5)}
+.s{font-family:'Cormorant Garamond',serif;font-style:italic;color:#f2b43a;font-size:34px;margin-top:14px}
+.glow{position:absolute;width:520px;height:520px;border-radius:50%;background:radial-gradient(circle,rgba(255,140,60,.16),transparent 65%)}</style></head>
+<body><div class="glow"></div><div class="t" id="t"></div><div class="s" id="s"></div>
+<script>const q=new URLSearchParams(location.search);t.textContent=q.get('t');s.textContent=q.get('s')||'';t.style.fontSize=(q.get('z')||56)+'px';</script></body></html>
