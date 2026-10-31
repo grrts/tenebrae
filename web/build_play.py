@@ -103,6 +103,39 @@ rep("[['DASH', 'RB', Math.max(0, p.dashCd) / 1.2], ['SLAM', '↓X', 0], ['WALL',
 # run always: no observer pausing for a single full-page canvas
 rep("R.forEach(r => io && io.observe(r.cv));", "")
 
+
+# --- braziers: strike one to relight it for 20 s (+15% damage, more light). Unlit ones burn low.
+rep("function arenaSim(ctx, rdt, r) {\n", """function brKey(bx, by) { return bx + ',' + by; }
+function brState(st) { if (st.brRun !== st.run) { st.brRun = st.run; st.brT = {}; } return st.brT; }
+function brLit(st, bx, by) { return (brState(st)[brKey(bx, by)] || 0) > st.time; }
+function brBuff(st) { const T = brState(st); for (const k in T) if (T[k] > st.time) return true; return false; }
+function arenaSim(ctx, rdt, r) {
+""")
+rep("  const hurt = (e, dmg, kx, ky, crit) => {\n", "  const hurt = (e, dmg, kx, ky, crit) => {\n    if (brBuff(st)) dmg *= 1.15;\n")
+rep("      if (!a.hit) { a.hit = true;", """      if (!a.hit) { const T = brState(st);
+        for (const [bx, by] of DA.braz) { const dx = (bx - p.x) * p.f;
+          if (dx > -20 && dx < REACH[st.weapon] + 10 && Math.abs(by - (p.y - 28)) < 80 && !(T[brKey(bx, by)] > st.time + 19)) {
+            T[brKey(bx, by)] = st.time + 20; sparks(st.P, bx, by - 8, 1.2, 18); st.rings.push({ x: bx, y: by - 8, t: 0, kind: 'ember' });
+            st.banner = { text: 'BRAZIER RELIT', sub: '+15% DAMAGE AND MORE LIGHT FOR 20 S', t: 1.2, col: C.gold }; } }
+      }
+      if (!a.hit) { a.hit = true;""")
+rep("const fl = .8 + S(st.time * 13 + bx) * .1 + S(st.time * 7.3 + by) * .1;", "const fl = (.8 + S(st.time * 13 + bx) * .1 + S(st.time * 7.3 + by) * .1) * (brLit(st, bx, by) ? 1.5 : .6);")
+rep("ctx.beginPath(); ctx.ellipse(bx + sd * 9, by - 6, 5, 9 + S(st.time * 14 + by) * 2, 0, 0, TAU); ctx.fill(); ctx.restore();",
+    "const bk = brLit(st, bx, by) ? 1.6 : .65; ctx.beginPath(); ctx.ellipse(bx + sd * 9, by - 6 * bk, 5 * bk, (9 + S(st.time * 14 + by) * 2) * bk, 0, 0, TAU); ctx.fill(); ctx.restore();")
+rep("r0 = lerp(460, 140, k);", "r0 = lerp(460, 140, k) * (brBuff(st) ? 1.35 : 1);")
+rep("      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);\n    }\n  }\n", """      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      // relit braziers push the dark back around themselves
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      for (const [bx, by] of DA.braz) if (brLit(st, bx, by)) {
+        const qx = (bx - st.cam.x) * ZM + W / 2, qy = (by - st.cam.y) * ZM + H / 2, rr = 260 * ZM;
+        if (qx < -rr || qx > W + rr || qy < -rr || qy > H + rr) continue;
+        const gg = ctx.createRadialGradient(qx, qy, 0, qx, qy, rr); gg.addColorStop(0, `rgba(255,150,80,${.35 * k})`); gg.addColorStop(1, 'rgba(255,150,80,0)');
+        ctx.fillStyle = gg; ctx.fillRect(qx - rr, qy - rr, rr * 2, rr * 2); }
+      ctx.restore();
+    }
+  }
+""")
+
 page = head + r'''<style>
   :root { --bg: #070506; --text: #f3ebe0; --muted: #9a9289; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }

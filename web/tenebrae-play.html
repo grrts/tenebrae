@@ -1335,6 +1335,10 @@ function spawnBoss(st) {
   st.E.push(st.boss);
 }
 
+function brKey(bx, by) { return bx + ',' + by; }
+function brState(st) { if (st.brRun !== st.run) { st.brRun = st.run; st.brT = {}; } return st.brT; }
+function brLit(st, bx, by) { return (brState(st)[brKey(bx, by)] || 0) > st.time; }
+function brBuff(st) { const T = brState(st); for (const k in T) if (T[k] > st.time) return true; return false; }
 function arenaSim(ctx, rdt, r) {
   pollInput();
   const st = r.st, W = r.W, H = r.H, p = st.p;
@@ -1390,6 +1394,7 @@ function arenaSim(ctx, rdt, r) {
     if (has(st, 'BLOODLINE') && !has(st, 'HUNGER') && ++st.healK >= 12) { st.healK = 0; if (st.hp < st.maxHp) { st.hp++; st.N.push({ x: p.x, y: p.y - 80, v: '+1 ♥', life: 1, crit: true, col: C.crimson }); } }
   };
   const hurt = (e, dmg, kx, ky, crit) => {
+    if (brBuff(st)) dmg *= 1.15;
     if (e.dead) return;
     dmg = dmg * (glass ? 2 : 1) + st.temper + (crit && has(st, 'WHETSTONE') ? 1 : 0);
     e.hp -= dmg; e.hit = .12;
@@ -1481,6 +1486,12 @@ function arenaSim(ctx, rdt, r) {
     }
     if (p.atk) {
       const a = p.atk, stepT = STEP[st.weapon];
+      if (!a.hit) { const T = brState(st);
+        for (const [bx, by] of DA.braz) { const dx = (bx - p.x) * p.f;
+          if (dx > -20 && dx < REACH[st.weapon] + 10 && Math.abs(by - (p.y - 28)) < 80 && !(T[brKey(bx, by)] > st.time + 19)) {
+            T[brKey(bx, by)] = st.time + 20; sparks(st.P, bx, by - 8, 1.2, 18); st.rings.push({ x: bx, y: by - 8, t: 0, kind: 'ember' });
+            st.banner = { text: 'BRAZIER RELIT', sub: '+15% DAMAGE AND MORE LIGHT FOR 20 S', t: 1.2, col: C.gold }; } }
+      }
       if (!a.hit) { a.hit = true;
         for (const e of live) { const dx = (e.x - p.x) * p.f; if (dx > -14 && dx < REACH[st.weapon] + (e.type === 'boss' ? 20 : 0) && Math.abs((e.y - e.h / 2) - (p.y - 28)) < 72) hurt(e, a.step === 2 ? 2 : 1, p.f * (a.step === 2 ? 240 : 130), a.step === 2 ? -760 : -140, a.step === 2); }
         if (a.step === 2 && has(st, 'STORM CUTS')) st.cres.push({ x: p.x + p.f * 24, y: p.y - 32, f: p.f, t: 0, hit: new Set() }); }
@@ -1581,7 +1592,7 @@ function arenaSim(ctx, rdt, r) {
   for (let i = 0; i < 9; i++) { const x = 30 + i * 112; ctx.beginPath(); for (let y = -20; y < H + 20; y += 10) { const yy = y + ((-par * 1.2) % 10); ctx.lineTo(x + S(yy * .02 + i) * 2, yy); } ctx.stroke(); }
   ctx.translate(W / 2, H / 2); ctx.scale(ZM, ZM); ctx.translate(-st.cam.x, -st.cam.y);
   for (const [bx, by] of DA.braz) {
-    const fl = .8 + S(st.time * 13 + bx) * .1 + S(st.time * 7.3 + by) * .1;
+    const fl = (.8 + S(st.time * 13 + bx) * .1 + S(st.time * 7.3 + by) * .1) * (brLit(st, bx, by) ? 1.5 : .6);
     ctx.save(); ctx.globalCompositeOperation = 'lighter'; const g = ctx.createRadialGradient(bx, by, 0, bx, by, 220 * fl);
     g.addColorStop(0, 'rgba(255,140,70,.42)'); g.addColorStop(1, 'rgba(255,140,70,0)'); ctx.fillStyle = g; ctx.fillRect(bx - 230, by - 230, 460, 460); ctx.restore();
   }
@@ -1589,7 +1600,7 @@ function arenaSim(ctx, rdt, r) {
     ctx.drawImage(img, sx, sy, vw, vh, sx, sy, vw, vh); }
   for (const [bx, by, sd] of DA.braz) {
     ctx.save(); ctx.fillStyle = '#ffb070'; ctx.shadowColor = '#ff7a3c'; ctx.shadowBlur = 18;
-    ctx.beginPath(); ctx.ellipse(bx + sd * 9, by - 6, 5, 9 + S(st.time * 14 + by) * 2, 0, 0, TAU); ctx.fill(); ctx.restore();
+    const bk = brLit(st, bx, by) ? 1.6 : .65; ctx.beginPath(); ctx.ellipse(bx + sd * 9, by - 6 * bk, 5 * bk, (9 + S(st.time * 14 + by) * 2) * bk, 0, 0, TAU); ctx.fill(); ctx.restore();
     if (Math.random() < .08) emit(st.P, { x: bx + sd * 9, y: by - 12, vx: rnd(-10, 10), vy: rnd(-70, -30), r: rnd(.8, 1.6), col: '#ff9a5c', glow: 6, life: rnd(.6, 1.2), a: .9 }); }
   if (DA.bell) { const [x, y] = DA.bell; ctx.save(); ctx.globalCompositeOperation = 'lighter'; const g = ctx.createRadialGradient(x, y + 80, 0, x, y + 80, 160); g.addColorStop(0, 'rgba(229,56,59,.18)'); g.addColorStop(1, 'rgba(229,56,59,0)'); ctx.fillStyle = g; ctx.fillRect(x - 160, y - 80, 320, 320); ctx.restore(); }
   // portals pulse harder as depth rises
@@ -1741,10 +1752,18 @@ function arenaSim(ctx, rdt, r) {
   {
     const out = (st.depth - 1) % 15 + Math.floor((st.depth - 1) / 15) * 3, k = clamp(out / 11, 0, 1);
     if (k > 0) {
-      const sx = (p.x - st.cam.x) * ZM + W / 2, sy = (p.y - 30 - st.cam.y) * ZM + H / 2, r0 = lerp(460, 140, k);
+      const sx = (p.x - st.cam.x) * ZM + W / 2, sy = (p.y - 30 - st.cam.y) * ZM + H / 2, r0 = lerp(460, 140, k) * (brBuff(st) ? 1.35 : 1);
       const g = ctx.createRadialGradient(sx, sy, r0 * .35, sx, sy, r0 * 1.6);
       g.addColorStop(0, 'rgba(4,2,3,0)'); g.addColorStop(1, `rgba(4,2,3,${lerp(.4, .88, k)})`);
       ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      // relit braziers push the dark back around themselves
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      for (const [bx, by] of DA.braz) if (brLit(st, bx, by)) {
+        const qx = (bx - st.cam.x) * ZM + W / 2, qy = (by - st.cam.y) * ZM + H / 2, rr = 260 * ZM;
+        if (qx < -rr || qx > W + rr || qy < -rr || qy > H + rr) continue;
+        const gg = ctx.createRadialGradient(qx, qy, 0, qx, qy, rr); gg.addColorStop(0, `rgba(255,150,80,${.35 * k})`); gg.addColorStop(1, 'rgba(255,150,80,0)');
+        ctx.fillStyle = gg; ctx.fillRect(qx - rr, qy - rr, rr * 2, rr * 2); }
+      ctx.restore();
     }
   }
   /* ---- HUD ---- */
