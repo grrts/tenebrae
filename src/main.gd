@@ -158,8 +158,20 @@ func _ready() -> void:
 	start(0, not smoke)
 
 
+var perf_n := 0
+var perf_sum := 0.0
+var perf_max := 0.0
+var perf_nodes := 0
+
+
 func _smoke(dt: float) -> void:
 	smoke_t += dt
+	# script cost per physics tick (headless, so no rendering): the budget at 120 Hz is 8.3 ms
+	var pt := Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+	perf_n += 1
+	perf_sum += pt
+	perf_max = maxf(perf_max, pt)
+	perf_nodes = maxi(perf_nodes, int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)))
 	var actions := ["left", "right", "jump", "attack", "dash", "down"]
 	for a in actions:
 		Input.action_release(a)
@@ -276,6 +288,7 @@ func _smoke(dt: float) -> void:
 				_load_arena(smoke_map)
 				smoke_map += 1
 			if smoke_p_t > MAPS.size() * 0.8 + 1:
+				print("smoke test: perf physics avg %.2f ms, worst %.2f ms over %d ticks, peak %d nodes" % [perf_sum / maxi(1, perf_n), perf_max, perf_n, perf_nodes])
 				print("smoke test: done, depth %d, kills %d" % [depth, kills])
 				get_tree().quit()
 
