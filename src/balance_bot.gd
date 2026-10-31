@@ -89,12 +89,19 @@ func _fight(p: Player, dt: float) -> void:
 	var dx := target.position.x - p.position.x
 	var dy := (target.position.y - target.h / 2) - (p.position.y - 28)
 	var near := absf(dx) < p.reach + 10 and absf(dy) < 70
-	# telegraphed attack close by: dash through it
-	if target.tele > 0 and absf(dx) < 150 and absf(dy) < 90 and dash_cd <= 0:
-		Input.action_press("right" if dx > 0 else "left")
-		Input.action_press("dash")
-		dash_cd = 0.7
-		return
+	# any enemy close by winding up or mid-attack: dash through it, or back off while the dash recharges
+	for e in game.enemies:
+		if e.dead or (e.tele <= 0 and e.act <= 0):
+			continue
+		var ex := e.position.x - p.position.x
+		if absf(ex) < 170 and absf(e.position.y - p.position.y) < 110:
+			if dash_cd <= 0 and p.dash_cd <= 0:
+				Input.action_press("right" if ex > 0 else "left")
+				Input.action_press("dash")
+				dash_cd = 0.5
+			elif p.invuln <= 0:
+				Input.action_press("left" if ex > 0 else "right")
+			return
 	if game.skill_meter >= 1.0 and absf(dx) < 260 and absf(dy) < 120:
 		Input.action_press("skill")
 	if not near:
@@ -113,7 +120,10 @@ func _fight(p: Player, dt: float) -> void:
 		if p.wall != 0 and frame % 10 == 0:
 			Input.action_press("jump")
 	else:
-		if (dx > 0) != (p.facing > 0):
+		# fight at the edge of reach, not inside the enemy's body
+		if absf(dx) < p.reach * 0.35 and p.invuln <= 0:
+			Input.action_press("left" if dx > 0 else "right")
+		elif (dx > 0) != (p.facing > 0):
 			Input.action_press("right" if dx > 0 else "left")
 		if frame % 3 == 0:
 			Input.action_press("attack")
