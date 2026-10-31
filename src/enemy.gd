@@ -59,6 +59,7 @@ var dodge_cd := 0.0
 var jump_cd := 0.0
 var drop_t := 0.0
 var side_off := 0.0
+var feinted := false
 # one vault at a time across the whole pack
 static var vault_at := 0.0
 
@@ -456,6 +457,13 @@ func _fly(dt: float) -> void:
 		if act_cd <= 0 and position.distance_to(target) < 230 and busy_count(game) < _tokens() + 1:
 			tele = 0.32
 			tele_max = 0.32
+			# the rest of the flock joins in, a beat apart
+			var n := 0
+			for o in game.enemies:
+				if n < 2 and o != self and not o.dead and o.kind == Kind.GLOOMWING and o.tele <= 0 and o.act <= 0 and game.depth >= 4 and o.position.distance_to(position) < 240:
+					n += 1
+					o.tele = 0.32 + 0.14 * n
+					o.tele_max = o.tele
 	facing = 1 if p.position.x > position.x else -1
 	position += vel * dt
 	position = position.clamp(Vector2(20, 20), game.world.size - Vector2(20, 20))
@@ -546,8 +554,22 @@ func _snuffer(dt: float) -> void:
 	if stun > 0:
 		return
 	if act > 0:
+		# at the Throne they feint: turn to face the blink and they blink again to your back
+		if act > 0.2 and not feinted and game.depth >= 13 and signf(position.x - p.position.x) == p.facing and randf() < dt * 6:
+			feinted = true
+			var to := p.position + Vector2(-p.facing * 70, 0)
+			var wd := game.world
+			if not wd.is_solid(wd.cell(to.x), wd.cell(to.y - 20)) and wd.is_solid(wd.cell(to.x), wd.cell(to.y + 20)):
+				game.fx.burst(position + Vector2(0, -28), 10, Color("#b44dff"), 120)
+				position = to
+				reset_physics_interpolation()
+				facing = -p.facing
+				act = 0.45
+				game.fx.burst(position + Vector2(0, -28), 10, Color("#b44dff"), 120)
 		var before := act
 		act -= dt
+		if act <= 0:
+			feinted = false
 		if before > 0.1 and act <= 0.1:
 			var box := Rect2(position.x + (0.0 if facing > 0 else -90.0), position.y - 64, 90, 64)
 			game.debug_box(box, Color(0.7, 0.3, 1, 0.4))
