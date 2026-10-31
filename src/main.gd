@@ -37,6 +37,7 @@ var boss: Boss = null
 var smoke := false
 var smoke_t := 0.0
 var smoke_held := ""
+var smoke_map := 0
 
 var map_i := 1
 var hitstop := 0.0
@@ -115,13 +116,13 @@ func _smoke(dt: float) -> void:
 		player.invuln = 0
 		player.dash = 0
 		player.take_hit(player.position.x)
-	if absf(smoke_t - 22) < dt:
-		print("smoke test: switching maps")
-		for i in MAPS.size():
-			start(i)
-			for k in 60:
-				_physics_process(1.0 / 120)
-	if smoke_t > 26:
+	if smoke_t > 22 and smoke_map < MAPS.size():
+		# one map per second, so every arena loads and runs briefly
+		if smoke_t > 22 + smoke_map * 0.8:
+			print("smoke test: map %s" % MAPS[smoke_map])
+			start(smoke_map)
+			smoke_map += 1
+	if smoke_t > 27:
 		print("smoke test: done, depth %d, kills %d" % [depth, kills])
 		get_tree().quit()
 
