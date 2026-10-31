@@ -121,6 +121,6 @@ func _draw() -> void:
 	for q in quakes:
 		var qx: float = q.x + q.dir * q.t * quake_speed - position.x
 		var qy: float = q.y - position.y
-		var a := 1.0 - q.t / 1.1
+		var a: float = 1.0 - q.t / 1.1
 		draw_line(Vector2(qx - 18, qy), Vector2(qx + 18, qy), Color(0.9, 0.22, 0.23, a), 5)
 		draw_line(Vector2(qx, qy), Vector2(qx, qy - 26 * a), Color(0.9, 0.22, 0.23, a * 0.6), 3)
