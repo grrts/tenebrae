@@ -58,6 +58,8 @@ Action Roguelike, Roguelite, 2D Platformer, Hack and Slash, Stickman, Dark Fanta
 | Screenshots | 1920 × 1080, at least 5 | One per dungeon plus a boss reveal card |
 | Trailer | 1080p, 60 to 90 s | Open on a slam, end on the candle going out |
 
+Drafts of the header, small and main capsules are in `docs/store/`, cut from a real Saint Umber frame of the browser build. `docs/store/capsule.html` lays the logo over any frame saved as `art.png` next to it; open it with `#920x430` (or any size) in the address. Final capsules should be painted at full resolution from the same composition.
+
 ## Before the page goes live
 
 - Trademark check on the name WICKBEARER (see the project plan).
