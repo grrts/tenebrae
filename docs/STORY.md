@@ -64,4 +64,4 @@ Add these to the playtest URL:
 
 - `web/story.js`: the cutscene engine, the script, and the death sequence
 - `web/build_story.py`: hooks story.js into the playtest build (run automatically at the end of `web/build_play.py`)
-- The Godot port of this layer is still to do; the prototype thread will port it once the web version settles.
+- `src/story.gd`, `src/hud.gd` and `src/main.gd`: the Godot port of the same layer (the cards, chapters, bosses, NOT YET, EXTINGUISHED and the victory)

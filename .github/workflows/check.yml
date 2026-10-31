@@ -13,7 +13,7 @@ jobs:
         run: godot --headless --import 2>&1 | tee import.log
       - name: Run the main scene for 600 frames
         run: timeout 120 godot --headless --quit-after 600 2>&1 | tee run.log
-      - name: Smoke test (bot plays through depths, boss, revive, death and every map)
+      - name: Smoke test (bot plays the whole story to the dawn, then the revive, a death and every map)
         run: timeout 180 godot --headless -- --smoke 2>&1 | tee smoke.log
       - name: Fail on script errors
         run: |

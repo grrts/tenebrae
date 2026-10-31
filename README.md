@@ -17,7 +17,8 @@ Open the folder in **Godot 4.3** (or newer 4.x) and press F5. The whole scene is
 | Switch arena | 1 to 5 | |
 | Restart | R | |
 | Debug panel / hitboxes | F1 / F2 | |
-| Skip to next depth | F3 | |
+| Skip to next depth / next boss | F3 / F4 | |
+| Skip a cutscene | Escape | |
 
 ## What's here
 
@@ -25,8 +26,9 @@ Open the folder in **Godot 4.3** (or newer 4.x) and press F5. The whole scene is
 - `src/player.gd` is the controller. Physics runs at 120 Hz with coyote time, a jump buffer, variable jump height, double jump, wall slide and wall jump, dash, drop-through, slam and the 3-step katana combo. Every tuning value is an `@export`, so it can be changed in the inspector while the game runs.
 - `src/rig.gd` is the procedural stick rig ported from the web pitch. Every joint is driven by a damped spring, so pose changes get real in-betweens.
 - `src/enemy.gd` has the four regular enemies: the Hollow (grunt), Gloomwing (flyer that dives, from depth II), Hexer (lobs violet hexes in arcs, from depth III) and Brute (heavy, telegraphed club swing, from depth V). Enemies come out of the portals nearest you, and their health rises 30% per depth.
-- `src/boss.gd` is the Chain Warden: walk, wind-up, then a floor smash that sends shockwaves both ways. Jump them. Below half health the wind-up gets shorter.
-- `src/hud.gd` draws the hearts, the depth title and the candle hearse.
+- `src/boss.gd` holds the four bosses on one body. The Chain Warden smashes the floor and sends shockwaves both ways. The Hollow King leaps and lands in a crash. The Ashen Jarl's forge-waves run faster and he starts leaping when hurt. Saint Umber leaps, casts hexes on every landing and wears a crown of candles.
+- `src/story.gd` is the story from `docs/STORY.md` as data: the chapters, the prologue, the boss reveals, the chapter intros and endings, and the finale.
+- `src/hud.gd` draws the hearts, the depth title, the candle hearse, the cutscene cards (letterbox, focus lines, name plates, title cards), the death band and the summaries.
 - `src/fx.gd` holds grey-box particles, rings and the double-jump wing burst.
 - `src/debug_overlay.gd` shows the player state, timers and FPS.
 
@@ -36,7 +38,21 @@ Open the folder in **Godot 4.3** (or newer 4.x) and press F5. The whole scene is
 - **Wax:** enemies drop wax that flies to you. It's your run currency and your XP.
 - **Rune drafts:** every level-up, pick 1 of 3 runes. Runes change your moves (Updraft, Ember Dash, Heavy Shadow, Finisher and more), and two are cursed.
 - **Shade merchant:** opens after each boss. Mend, Temper, or walk on.
-- **Death:** a "Lights out" summary, 40% of your wax (plus 50 per boss) is banked to `user://tenebrae.cfg`, then a new run.
+- **Death:** souls-like. The world slows and drains, the Wick crumbles into embers, and **EXTINGUISHED** fades in. 40% of your wax (plus 50 per boss) is banked to `user://tenebrae.cfg`, then a new run.
+- **Victory:** beat Saint Umber at depth XVI to see the finale and **THE DAWN RETURNS**. A won run keeps all its wax.
+
+## The story
+
+One run is the whole story (see `docs/STORY.md`). Four chapters of four depths each, and each chapter is its own dungeon:
+
+| Depths | Dungeon (map) | Boss |
+| --- | --- | --- |
+| I-IV | The Pit of Psalms (`pit`) | The Chain Warden |
+| V-VIII | The Drowned Well (`well`) | The Hollow King |
+| IX-XII | The Bladeworks (`blade`) | The Ashen Jarl |
+| XIII-XVI | The Hollow Throne (`throne`) | Saint Umber, the Candle-Eater |
+
+The prologue, chapter intros and boss endings play once per save (the list is kept in `user://tenebrae.cfg`). Boss reveals and the finale always play. Every card can be advanced with jump or attack, and Escape skips the scene.
 
 All weapon, rune and shop numbers live in `src/run_data.gd`.
 
@@ -44,10 +60,10 @@ All weapon, rune and shop numbers live in `src/run_data.gd`.
 
 The name comes from an old church service where 15 candles on a triangular stand are put out one by one until the church is dark. The run follows it:
 
-- **The hearse is the depth meter.** One candle goes out per depth (40 s here, 2 to 3 minutes in the real game). After 15 the stand relights and the count restarts darker.
+- **The hearse is the depth meter.** One candle goes out per depth (40 s here, 2 to 3 minutes in the real game), and they stay out. At depth XVI all fifteen are dark and the throne room is lit only by the Wick.
 - **The church darkens.** A `CanvasModulate` dims the world as candles go out, and the light around the player shrinks.
 - **Braziers push the dark back.** Strike one to relight it for 20 s: it lights its area, and you deal +15% damage with a wider light.
-- **The hidden candle** under the hearse is your one revive per run, at half health.
+- **The hidden candle** under the hearse is your one revive per run, at half health: a white flash and *NOT YET*.
 - **The strepitus** is the crash that brings a boss down every 4 depths. The depth timer pauses until the boss dies.
 
 ## Map legend

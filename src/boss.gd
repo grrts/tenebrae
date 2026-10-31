@@ -8,6 +8,10 @@ extends Enemy
 ## The Hollow King (every second boss) uses the same body, bigger: instead of a
 ## standing smash he leaps at you and lands in a crash that sends waves both
 ## ways, and below half health he also casts a fan of hexes from the landing.
+##
+## The Ashen Jarl (chapter III) smashes like the Warden, but his forge-waves run
+## faster and below half health he starts leaping too. Saint Umber (the end)
+## leaps like the King, casts hexes on every landing, and wears a candle crown.
 
 @export var walk_speed := 75.0
 @export var quake_speed := 560.0
@@ -17,7 +21,9 @@ var t := 1.6
 var landed := false
 var quakes: Array = []
 var king := false
+var idx := 0
 var boss_name := "THE CHAIN WARDEN"
+var accent := Color("#e5383b")
 
 
 func _ready() -> void:
@@ -25,11 +31,18 @@ func _ready() -> void:
 	h = 120
 
 
-func setup_boss(hp_mul: float, is_king := false) -> void:
-	king = is_king
-	boss_name = "THE HOLLOW KING" if king else "THE CHAIN WARDEN"
-	max_hp = (26.0 if king else 20.0) * hp_mul
+## i is the chapter (0-3): Warden, Hollow King, Ashen Jarl, Saint Umber.
+func setup_boss(hp_mul: float, i := 0) -> void:
+	idx = i
+	king = i == 1 or i == 3
+	var ch: Dictionary = Story.CHAPTERS[i]
+	boss_name = ch.boss
+	accent = ch.col
+	max_hp = [20.0, 26.0, 30.0, 20.0 * 2.2][i] * hp_mul
 	hp = max_hp
+	if i == 2:
+		quake_speed = 720.0
+		walk_speed = 95.0
 	if king:
 		w = 52
 		h = 140
@@ -59,7 +72,7 @@ func _physics_process(dt: float) -> void:
 				t = 0.5 if enraged else 0.75
 		"wind":
 			vel.x = move_toward(vel.x, 0, 1600 * dt)
-			if t <= 0 and king:
+			if t <= 0 and (king or (idx == 2 and enraged and randf() < 0.5)):
 				# leap at the player; the landing is the smash
 				state = "leap"
 				vel = Vector2(clampf(dx * 1.4, -520, 520), -900)
@@ -69,7 +82,7 @@ func _physics_process(dt: float) -> void:
 				t = 0.5
 				var sx := position.x + facing * 60
 				game.shake(0.35, 12)
-				game.fx.ring(Vector2(sx, position.y), 300, Color("#e5383b"))
+				game.fx.ring(Vector2(sx, position.y), 300, accent)
 				quakes.append({"x": sx, "y": position.y, "dir": -1, "t": 0.0})
 				quakes.append({"x": sx, "y": position.y, "dir": 1, "t": 0.0})
 		"leap":
@@ -77,14 +90,15 @@ func _physics_process(dt: float) -> void:
 				state = "smash"
 				t = 0.6
 				game.shake(0.45, 16)
-				game.fx.ring(position, 320, Color("#e5383b"))
+				game.fx.ring(position, 320, accent)
 				quakes.append({"x": position.x, "y": position.y, "dir": -1, "t": 0.0})
 				quakes.append({"x": position.x, "y": position.y, "dir": 1, "t": 0.0})
 				if absf(dx) < 110 and absf(p.position.y - position.y) < 60:
 					p.take_hit(position.x)
-				if enraged:
-					for k in 5:
-						var tgt := p.position + Vector2((k - 2) * 90, -30)
+				if enraged or idx == 3:
+					var n := 5 if enraged else 3
+					for k in n:
+						var tgt := p.position + Vector2((k - (n - 1) / 2.0) * 90, -30)
 						game.fire_hex(position + Vector2(0, -120), tgt)
 		"smash":
 			if t <= 0:
@@ -140,20 +154,41 @@ func _draw() -> void:
 		pose = {"lean": 0.3, "tilt": -0.1, "legs": [[0.9, -1.8], [1.2, -1.9]], "arms": [[-2.2, 0.4], [-2.6, 0.2]]}
 	var sc := 1.55 if king else 1.3
 	var J := Rig.build(pose, Vector2(0, -80 * sc / 1.3), facing, sc)
-	Rig.paint(self, J, body, Color("#1d1a20"), Color(0.9, 0.22, 0.23, 0.7), Color("#e5383b"))
-	# the warden's chain: a heavy weight on a swinging line
+	var rim := Color(accent, 0.7)
+	Rig.paint(self, J, body, Color("#1d1a20"), rim, accent)
 	var hand: Vector2 = J.armF.e
 	var ang: float = J.armF.can
-	var tip := hand + Vector2(cos(ang), sin(ang)) * 90
-	draw_line(hand, tip, Color("#5a5560"), 3)
-	draw_circle(tip, 14, body)
-	draw_arc(tip, 14, 0, TAU, 20, Color(0.9, 0.22, 0.23, 0.7), 2)
+	if idx == 0:
+		# the warden's chain: a heavy weight on a swinging line
+		var tip := hand + Vector2(cos(ang), sin(ang)) * 90
+		draw_line(hand, tip, Color("#5a5560"), 3)
+		draw_circle(tip, 14, body)
+		draw_arc(tip, 14, 0, TAU, 20, rim, 2)
+	else:
+		# a long blade; the jarl's still glows from the forge
+		Rig.blade(self, hand, ang, 96.0 if idx == 2 else 80.0, 1.0 if idx == 2 else 0.4)
+	var hc: Vector2 = J.head
+	var hr: float = J.head_r
+	if idx == 1 or idx == 3:
+		# the drowned crown, or Umber's crown of candles taken from the hearse
+		var base := hc + Vector2(0, -hr * 0.8)
+		draw_line(base + Vector2(-hr, 0), base + Vector2(hr, 0), Color("#5a524c") if idx == 1 else Color("#3a2f2a"), 4)
+		var tk := Time.get_ticks_msec() / 1000.0
+		for k in 5:
+			var cx := base.x + (k - 2) * hr * 0.45
+			if idx == 1:
+				draw_line(Vector2(cx, base.y), Vector2(cx, base.y - 10), Color("#5a524c"), 3)
+			else:
+				draw_rect(Rect2(cx - 2, base.y - 12, 4, 12), Color("#e8dccb"))
+				var fl := 1 + sin(tk * 12 + k * 1.9) * 0.18
+				draw_circle(Vector2(cx, base.y - 16), 6 * fl, Color(0.7, 0.3, 1, 0.3))
+				draw_circle(Vector2(cx, base.y - 16), 3 * fl, accent)
 	if state == "wind":
-		draw_arc(Vector2(facing * 60, 0), 40, PI, TAU, 24, Color(0.9, 0.22, 0.23, 0.6), 3)
+		draw_arc(Vector2(facing * 60, 0), 40, PI, TAU, 24, Color(accent, 0.6), 3)
 	# shockwaves are drawn in local space
 	for q in quakes:
 		var qx: float = q.x + q.dir * q.t * quake_speed - position.x
 		var qy: float = q.y - position.y
 		var a: float = 1.0 - q.t / 1.1
-		draw_line(Vector2(qx - 18, qy), Vector2(qx + 18, qy), Color(0.9, 0.22, 0.23, a), 5)
-		draw_line(Vector2(qx, qy), Vector2(qx, qy - 26 * a), Color(0.9, 0.22, 0.23, a * 0.6), 3)
+		draw_line(Vector2(qx - 18, qy), Vector2(qx + 18, qy), Color(accent, a), 5)
+		draw_line(Vector2(qx, qy), Vector2(qx, qy - 26 * a), Color(accent, a * 0.6), 3)

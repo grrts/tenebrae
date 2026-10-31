@@ -32,6 +32,9 @@ var depth_t := 0.0
 var hidden_candle := true
 var boss: Boss = null
 var frozen := false
+# true between a boss kill and the end of its cutscene and shop, so the depth clock waits
+var story_hold := false
+var won := false
 
 # run state
 var weapon := ""
@@ -47,6 +50,7 @@ var pickups: Array = []
 const SAVE_PATH := "user://tenebrae.cfg"
 var bank := 0
 var earned := 0
+var seen: Array = []
 
 # --smoke (used by CI): a bot mashes inputs, depths fly by, and the run is forced
 # through the boss, the hidden candle and a death, then the game quits.
@@ -55,6 +59,8 @@ var smoke_t := 0.0
 var smoke_held := ""
 var smoke_map := 0
 var smoke_boss_t := 0.0
+var smoke_phase := 0
+var smoke_p_t := 0.0
 
 var map_i := 1
 var hitstop := 0.0
@@ -121,34 +127,61 @@ func _smoke(dt: float) -> void:
 		smoke_held = ["left", "right", ""][randi() % 3]
 	if randf() < dt * 6:
 		Input.action_press(actions[2 + randi() % 4])
-	# bosses get 3 s to show their pattern, then the bot kills them so both bosses and the shop run
-	if boss != null:
-		smoke_boss_t += dt
-		if smoke_boss_t > 3.0:
-			smoke_boss_t = 0.0
-			print("smoke test: killing %s" % boss.boss_name)
-			hit_enemy(boss, 99999, Vector2.ZERO)
-		if smoke_t < 14 and player.hp < 2:
-		player.hp = player.max_hp
-	if absf(smoke_t - 16) < dt and not player.dead:
-		print("smoke test: forcing hidden candle, then death")
-		player.hp = 1
-		player.invuln = 0
-		player.take_hit(player.position.x)
-	if absf(smoke_t - 19) < dt and not player.dead:
-		player.hp = 1
-		player.invuln = 0
-		player.dash = 0
-		player.take_hit(player.position.x)
-	if smoke_t > 22 and smoke_map < MAPS.size():
-		# one map per second, so every arena loads and runs briefly
-		if smoke_t > 22 + smoke_map * 0.8:
-			print("smoke test: map %s" % MAPS[smoke_map])
-			start(smoke_map)
-			smoke_map += 1
-	if smoke_t > 27:
-		print("smoke test: done, depth %d, kills %d" % [depth, kills])
-		get_tree().quit()
+	if smoke_t > 170:
+		print("smoke test: timed out in phase %d at depth %d" % [smoke_phase, depth])
+		get_tree().quit(1)
+	match smoke_phase:
+		0:
+			# play the whole story: the bot cannot die, and each boss gets 2 s before it is killed
+			player.hp = player.max_hp
+			if boss != null:
+				smoke_boss_t += dt
+				if smoke_boss_t > 2.0:
+					smoke_boss_t = 0.0
+					print("smoke test: killing %s at depth %d" % [boss.boss_name, depth])
+					hit_enemy(boss, 99999, Vector2.ZERO)
+			if won:
+				print("smoke test: reached the dawn after %d s" % int(smoke_t))
+				smoke_phase = 1
+		1:
+			# the victory summary closes on a press, which starts a new run
+			if not won and not hud.busy():
+				smoke_phase = 2
+				smoke_p_t = 0.0
+		2:
+			smoke_p_t += dt
+			if smoke_p_t > 3 and hidden_candle and not hud.busy():
+				print("smoke test: forcing the hidden candle")
+				_smoke_hit()
+			elif smoke_p_t > 5 and not hidden_candle and not player.dead and not hud.busy():
+				print("smoke test: forcing death")
+				_smoke_hit()
+			elif player.dead and hud.summary != null:
+				print("smoke test: death summary shown")
+				hud.summary = null
+				smoke_phase = 3
+				smoke_p_t = 0.0
+				player.dead = false
+				player.hp = player.max_hp
+				Engine.time_scale = 1.0
+		3:
+			# every arena loads and runs briefly
+			smoke_p_t += dt
+			if smoke_map < MAPS.size() and smoke_p_t > smoke_map * 0.8:
+				print("smoke test: map %s" % MAPS[smoke_map])
+				hud.menu = null
+				_load_arena(smoke_map)
+				smoke_map += 1
+			if smoke_p_t > MAPS.size() * 0.8 + 1:
+				print("smoke test: done, depth %d, kills %d" % [depth, kills])
+				get_tree().quit()
+
+
+func _smoke_hit() -> void:
+	player.hp = 1
+	player.invuln = 0
+	player.dash = 0
+	player.take_hit(player.position.x)
 
 
 ## Depth numbers read as Roman numerals, like psalm numbers in the service.
@@ -161,50 +194,41 @@ static func roman(n: int) -> String:
 	return r
 
 
-## Candles out on the hearse. After all 15 the stand relights and the count restarts.
+## Candles out on the hearse. One per depth, and they stay out: at depth XVI all fifteen are dark.
 func candles_out() -> int:
-	return (depth - 1) % 15
+	return mini(15, depth - 1)
 
 
-## 0 at depth I, 1 when the church is nearly dark. Later cycles start darker.
+## 0 at depth I, 1 in the throne room, lit only by the Wick.
 func darkness() -> float:
-	return clampf((candles_out() + floori((depth - 1) / 15.0) * 3) / 11.0, 0, 1)
+	return clampf(candles_out() / 13.0, 0, 1)
 
 
+func chapter() -> int:
+	return Story.chapter_of(depth)
+
+
+## A new run. i is the map; the story always begins in the Pit, the number keys can start elsewhere for testing.
 func start(i: int) -> void:
-	map_i = i
-	for e in enemies:
-		e.queue_free()
-	enemies.clear()
-	boss = null
+	Engine.time_scale = 1.0
 	if player:
 		player.queue_free()
-	hexes.clear()
-	if lights:
-		lights.queue_free()
 	for n in [fx, dbg, camera, hex_layer]:
 		if n.get_parent():
 			n.get_parent().remove_child(n)
-	world.load_map("res://maps/%s.txt" % MAPS[i])
 	player = Player.new()
 	player.game = self
-	player.position = world.spawn
 	add_child(player)
 	add_child(fx)
 	add_child(hex_layer)
 	add_child(dbg)
 	player.add_child(camera)
-	lights = Node2D.new()
-	add_child(lights)
 	player_light = _make_light(player, Vector2(0, -30), 4.5, 1.0)
-	brazier_lights.clear()
-	brazier_t.clear()
-	for b in world.braziers:
-		brazier_lights.append(_make_light(lights, b, 1.5, 0.35))
-		brazier_t.append(0.0)
 	depth = 1
 	depth_t = 0.0
 	hidden_candle = true
+	story_hold = false
+	won = false
 	runes.clear()
 	lvl = 1
 	xp = 0
@@ -212,9 +236,53 @@ func start(i: int) -> void:
 	temper = 0
 	bosses = 0
 	run_time = 0.0
-	pickups.clear()
+	kills = 0
+	dead_t = 0.0
+	hitstop = 0.0
 	_load_meta()
-	_weapon_draw()
+	_load_arena(i)
+	_play_once("prologue", Story.PROLOGUE, _weapon_draw)
+
+
+## Swaps the arena under a running game: chapters move the run to a new dungeon.
+func _load_arena(i: int) -> void:
+	map_i = i
+	for e in enemies:
+		e.queue_free()
+	enemies.clear()
+	boss = null
+	hexes.clear()
+	pickups.clear()
+	if lights:
+		lights.queue_free()
+	world.load_map("res://maps/%s.txt" % MAPS[i])
+	player.position = world.spawn
+	player.vel = Vector2.ZERO
+	lights = Node2D.new()
+	add_child(lights)
+	brazier_lights.clear()
+	brazier_t.clear()
+	for b in world.braziers:
+		brazier_lights.append(_make_light(lights, b, 1.5, 0.35))
+		brazier_t.append(0.0)
+	camera.position = Vector2(0, -60)
+	camera.limit_left = 0
+	camera.limit_top = 0
+	camera.limit_right = int(world.size.x)
+	camera.limit_bottom = int(world.size.y)
+	camera.reset_smoothing()
+	spawn_t = 1.0
+
+
+## Story scenes that set the scene play once per save; boss reveals and the finale always play.
+func _play_once(id: String, cards: Array, cb: Callable) -> void:
+	if id in seen and not smoke:
+		cb.call()
+		return
+	if not id in seen:
+		seen.append(id)
+		_save_meta()
+	hud.play(cards, cb)
 
 
 func _weapon_draw() -> void:
@@ -229,7 +297,7 @@ func _weapon_draw() -> void:
 
 func _pick_weapon(o: Dictionary) -> void:
 	_equip(o.id)
-	hud.show_banner("DEPTH I", "%s · FIFTEEN CANDLES · NO END" % o.name, 1.8)
+	hud.show_banner("DEPTH I", "%s · %s" % [o.name, Story.CHAPTERS[0].name], 1.8)
 
 
 func _equip(id: String) -> void:
@@ -306,6 +374,7 @@ func _open_shop() -> void:
 
 
 func _buy(o: Dictionary) -> void:
+	story_hold = false
 	if run_wax < o.cost:
 		hud.show_banner("NOT ENOUGH WAX", "YOU WALK ON", 1.2)
 		return
@@ -321,12 +390,14 @@ func _load_meta() -> void:
 	if cfg.load(SAVE_PATH) == OK:
 		bank = cfg.get_value("meta", "bank", 0)
 		earned = cfg.get_value("meta", "earned", 0)
+		seen = cfg.get_value("story", "seen", [])
 
 
 func _save_meta() -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("meta", "bank", bank)
 	cfg.set_value("meta", "earned", earned)
+	cfg.set_value("story", "seen", seen)
 	cfg.save(SAVE_PATH)
 
 
@@ -362,16 +433,6 @@ func _step_pickups(dt: float) -> void:
 				lvl += 1
 				_open_draft()
 	pickups = pickups.filter(func(pk): return pk.t < 20)
-	camera.position = Vector2(0, -60)
-	camera.limit_left = 0
-	camera.limit_top = 0
-	camera.limit_right = int(world.size.x)
-	camera.limit_bottom = int(world.size.y)
-	camera.reset_smoothing()
-	kills = 0
-	spawn_t = 1.0
-	dead_t = 0.0
-	hitstop = 0.0
 
 
 func _physics_process(dt: float) -> void:
@@ -391,12 +452,14 @@ func _physics_process(dt: float) -> void:
 		return
 	if player.dead:
 		dead_t += dt
-		if dead_t > 1.6 and dead_t - dt <= 1.6:
+		if randf() < dt * 20:
+			fx.burst(player.position + Vector2(randf_range(-14, 14), -20 - randf() * 30), 1, Color("#f2b43a"), 60)
+		if dead_t > 2.6 and dead_t - dt <= 2.6:
 			_end_run()
 		return
 	run_time += dt
 	_step_pickups(dt)
-	if boss == null:
+	if boss == null and not story_hold and depth < 16:
 		depth_t += dt
 	if depth_t >= depth_time:
 		next_depth()
@@ -411,23 +474,38 @@ func _physics_process(dt: float) -> void:
 
 
 func next_depth() -> void:
+	if boss != null or story_hold or depth >= 16:
+		return
 	depth_t = 0.0
 	depth += 1
-	if depth % 4 == 0:
-		_spawn_boss()
-	elif candles_out() == 0:
-		hud.show_banner("DEPTH %s" % roman(depth), "THE CANDLES ARE RELIT · THE DARK COMES FASTER", 2.2)
-	else:
-		var sub: String = {2: "GLOOMWINGS JOIN", 3: "HEXERS APPEAR", 5: "BRUTES APPEAR"}.get(depth, "ENEMIES +%d%% HP" % roundi((hp_mul() - 1) * 100))
-		hud.show_banner("DEPTH %s · A CANDLE GOES OUT" % roman(depth), sub)
 	shake(0.15, 4)
+	var ch := chapter()
+	if depth % 4 == 0:
+		# the strepitus: the boss is revealed, then crashes down
+		story_hold = true
+		hud.play(Story.REVEALS[ch], _spawn_boss)
+	elif depth % 4 == 1:
+		story_hold = true
+		_play_once("intro%d" % ch, Story.INTROS[ch], _enter_chapter)
+	else:
+		var sub: String = {2: "GLOOMWINGS JOIN", 3: "HEXERS APPEAR", 6: "BRUTES APPEAR"}.get(depth, "%d OF 15 STILL LIT" % (15 - candles_out()))
+		hud.show_banner("DEPTH %s · A CANDLE GOES OUT" % roman(depth), sub)
 
 
-## The strepitus: in the service a loud crash ends the darkness. Here it brings the boss down.
+func _enter_chapter() -> void:
+	story_hold = false
+	var ch: Dictionary = Story.CHAPTERS[chapter()]
+	_load_arena(ch.map)
+	hud.show_banner("DEPTH %s" % roman(depth), ch.name, 2.2)
+
+
 func _spawn_boss() -> void:
+	story_hold = false
+	var ch := chapter()
 	boss = Boss.new()
 	boss.game = self
-	boss.setup_boss(hp_mul(), bosses % 2 == 1)
+	# bosses scale by chapter, not by depth, so the last fight stays a fight
+	boss.setup_boss(1.0 + ch * 0.5, ch)
 	var x := clampf(player.position.x + (420.0 if player.position.x < world.size.x / 2 else -420.0), 120, world.size.x - 120)
 	var y := player.position.y - 300
 	if world.is_solid(world.cell(x), world.cell(y)) or world.is_solid(world.cell(x), world.cell(y - 100)):
@@ -441,6 +519,19 @@ func _spawn_boss() -> void:
 	hud.show_banner("DEPTH %s · STREPITUS" % roman(depth), "%s DESCENDS" % boss.boss_name, 2.4)
 
 
+## After a boss: its last words, then the merchant. After Saint Umber: the finale and the dawn.
+func _after_boss(ch: int) -> void:
+	if ch == 3:
+		hud.play(Story.ENDINGS[3], _victory)
+	else:
+		_play_once("ending%d" % ch, Story.ENDINGS[ch], _open_shop)
+
+
+func _victory() -> void:
+	won = true
+	_end_run()
+
+
 func hp_mul() -> float:
 	return 1.0 + (depth - 1) * 0.3
 
@@ -452,10 +543,12 @@ func try_revive() -> bool:
 	hidden_candle = false
 	player.hp = ceilf(player.max_hp / 2)
 	player.invuln = 2.2
-	hitstop = 0.2
+	hitstop = 0.3
 	shake(0.3, 10)
+	hud.flash(Color.WHITE, 0.3)
 	fx.ring(player.position, 220, Color("#f2b43a"))
-	hud.show_banner("THE HIDDEN CANDLE", "RETURNED ONCE · IT WILL NOT RETURN AGAIN", 2.0)
+	fx.burst(player.position + Vector2(0, -30), 24, Color("#f2b43a"), 220)
+	hud.show_banner("NOT YET", "THE HIDDEN CANDLE RETURNS · IT WILL NOT RETURN AGAIN", 2.2)
 	for e in enemies:
 		if not e.dead and e.position.distance_to(player.position) < 200:
 			hit_enemy(e, 3, Vector2(signf(e.position.x - player.position.x) * 420, -420))
@@ -568,27 +661,37 @@ func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 			hud.show_banner("BLOODLINE", "+1 HEART", 1.0)
 		if e == boss:
 			bosses += 1
-			get_tree().create_timer(1.6).timeout.connect(_open_shop)
+			story_hold = true
+			get_tree().create_timer(1.6).timeout.connect(_after_boss.bind((e as Boss).idx))
 			boss = null
 			hitstop = 0.25
 			shake(0.5, 14)
 			fx.ring(e.position, 320, Color("#f2b43a"))
-			hud.show_banner("%s SLAIN" % (e as Boss).boss_name.replace("THE ", ""), "THE CLIMB GOES ON", 2.4)
+			hud.show_banner("%s FALLS" % (e as Boss).boss_name.replace("THE ", ""), "THE DESCENT GOES ON", 2.4)
 
 
+## The killing blow: hit-stop, a red flash, the world slows and drains, the Wick crumbles to embers.
 func on_player_dead() -> void:
 	dead_t = 0.0
 	shake(0.4, 14)
+	hitstop = 0.25
+	hud.flash(Color("#e5383b"), 0.35)
+	Engine.time_scale = 0.5
+	fx.burst(player.position + Vector2(0, -30), 30, Color("#0a0a0d"), 120)
+	fx.burst(player.position + Vector2(0, -30), 22, Color("#f2b43a"), 90)
 
 
 func _end_run() -> void:
-	var kept := roundi(run_wax * 0.4) + bosses * 50
+	Engine.time_scale = 1.0
+	var kept := (run_wax if won else roundi(run_wax * 0.4)) + bosses * 50
 	var before := earned
 	bank += kept
 	earned += kept
 	_save_meta()
 	var unlocked := "CHAIN SICKLE" if before < 400 and earned >= 400 else ""
-	hud.open_summary({"depth": depth, "time": run_time, "kills": kills, "bosses": bosses, "wax": run_wax, "kept": kept, "bank": bank, "unlocked": unlocked})
+	var title := "THE DAWN RETURNS" if won else "EXTINGUISHED"
+	var col := Color("#f2b43a") if won else Color("#e5383b")
+	hud.open_summary({"title": title, "col": col, "won": won, "depth": depth, "time": run_time, "kills": kills, "bosses": bosses, "wax": run_wax, "kept": kept, "bank": bank, "unlocked": unlocked})
 
 
 func shake(t: float, mag: float) -> void:
@@ -613,6 +716,9 @@ func _process(dt: float) -> void:
 	# the church darkens as candles go out; braziers you relight push it back locally
 	var k := darkness()
 	dark.color = Color(0.85, 0.8, 0.8).lerp(Color(0.09, 0.07, 0.08), k)
+	if player.dead:
+		var g := dark.color.get_luminance()
+		dark.color = dark.color.lerp(Color(g, g, g), clampf(dead_t, 0, 1))
 	player_light.texture_scale = lerpf(4.5, 1.6, k) * (1.3 if brazier_buff() else 1.0)
 	player_light.energy = lerpf(0.5, 1.1, k)
 	for i in brazier_lights.size():
@@ -643,6 +749,11 @@ func _unhandled_input(ev: InputEvent) -> void:
 				start(map_i)
 			KEY_F3:
 				next_depth()
+			KEY_F4:
+				# jump to the next boss
+				if boss == null and not story_hold and not hud.busy():
+					depth = mini(15, (depth / 4) * 4 + 3)
+					next_depth()
 			KEY_1, KEY_2, KEY_3, KEY_4, KEY_5:
 				start(k.physical_keycode - KEY_1)
 
