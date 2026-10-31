@@ -155,11 +155,11 @@ func _paint() -> void:
 	var mh := int(p.max_hp)
 	var bw := 34.0 * mh
 	var bx := vp.x - 30 - bw
-	var k := clampf(p.hp / p.max_hp, 0, 1)
-	hp_show = move_toward(hp_show, k, get_process_delta_time() * 0.6) if hp_show > k else k
+	var hk := clampf(p.hp / p.max_hp, 0, 1)
+	hp_show = move_toward(hp_show, hk, get_process_delta_time() * 0.6) if hp_show > hk else hk
 	canvas.draw_rect(Rect2(bx - 2, 20, bw + 4, 18), Color(0, 0, 0, 0.75))
 	canvas.draw_rect(Rect2(bx, 22, bw * hp_show, 14), Color(0.95, 0.7, 0.23, 0.55))
-	canvas.draw_rect(Rect2(bx, 22, bw * k, 14), Color("#e5383b"))
+	canvas.draw_rect(Rect2(bx, 22, bw * hk, 14), Color("#e5383b"))
 	for i in range(1, mh):
 		canvas.draw_rect(Rect2(bx + i * 34 - 1, 22, 2, 14), Color(0, 0, 0, 0.8))
 	_text("%d / %d" % [int(p.hp), mh], Vector2(bx - 64, 35), 13, Color("#f3ebe0"))
