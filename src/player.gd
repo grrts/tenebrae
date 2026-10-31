@@ -40,6 +40,11 @@ var game: Game
 # timers
 var coyote := 0.0
 var buffer := 0.0
+var atk_buffer := 0.0 ## a swing pressed during a dash, slam or hit-stop fires as soon as it can
+var dash_buffer := 0.0
+var last_h := 0 ## with left and right both held, the last one pressed wins
+var was_jump_held := false
+var mouse_aim := false ## the last swing or dash came from the mouse: aim it at the cursor
 var dash := 0.0
 var dash_cd := 0.0
 var air_dash_used := false
@@ -95,11 +100,30 @@ func _physics_process(dt: float) -> void:
 		game.world.move(self, dt, false)
 		return
 
+	if Input.is_action_just_pressed("left"):
+		last_h = -1
+	if Input.is_action_just_pressed("right"):
+		last_h = 1
 	var ix := Input.get_axis("left", "right")
+	if Input.is_action_pressed("left") and Input.is_action_pressed("right"):
+		ix = float(last_h)
 	var down := Input.get_action_strength("down") > 0.5
-	if Input.is_action_just_pressed("jump"):
+	var jump_held := Input.is_action_pressed("jump") or Input.is_action_pressed("up_jump")
+	var released := was_jump_held and not jump_held
+	was_jump_held = jump_held
+	if Input.is_action_just_pressed("jump") or Input.is_action_just_pressed("up_jump"):
 		buffer = jump_buffer
-	for t in ["coyote", "buffer", "dash_cd", "wall_lock_t", "drop_t", "invuln", "land", "stretch", "flip", "kick"]:
+	if Input.is_action_just_pressed("attack"):
+		atk_buffer = 0.16
+		mouse_aim = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	if Input.is_action_just_pressed("dash"):
+		dash_buffer = 0.14
+		mouse_aim = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+	# buffers hold through a dash, so whatever you press during it comes out right after
+	var timers := ["coyote", "dash_cd", "wall_lock_t", "drop_t", "invuln", "land", "stretch", "flip", "kick"]
+	if dash <= 0:
+		timers.append_array(["buffer", "atk_buffer", "dash_buffer"])
+	for t in timers:
 		set(t, maxf(0, get(t) - dt))
 	if ground:
 		coyote = coyote_time
@@ -107,13 +131,16 @@ func _physics_process(dt: float) -> void:
 		dj_used = false
 
 	# --- dash cancels everything
-	if Input.is_action_just_pressed("dash") and dash_cd <= 0 and not (air_dash_used and not ground):
+	if dash_buffer > 0 and dash <= 0 and dash_cd <= 0 and not (air_dash_used and not ground):
+		dash_buffer = 0
 		dash = dash_time
 		dash_cd = dash_cooldown
 		atk = null
 		slam = false
 		if absf(ix) > 0.2:
 			facing = int(signf(ix))
+		elif mouse_aim:
+			facing = _mouse_side()
 		if not ground:
 			air_dash_used = true
 		game.dash_id += 1
@@ -146,18 +173,25 @@ func _physics_process(dt: float) -> void:
 					game.hit_enemy(e, damage * 2 * (1.7 if game.has_rune("HEAVY SHADOW") else 1.0), Vector2(signf(e.position.x - position.x) * 320, -520))
 		return
 
-	# --- attack input
-	if Input.is_action_just_pressed("attack"):
-		if not ground and down:
-			slam = true
-			atk = null
-			vel.y = -180
-		elif atk == null:
-			atk = {"step": 0, "t": 0.0, "hit": [], "queued": false}
-			if absf(ix) > 0.2:
-				facing = int(signf(ix))
-		else:
-			atk.queued = true
+	# --- attack input: tap to swing, hold to keep the combo going, down + attack in the air slams
+	var holding := Input.is_action_pressed("attack")
+	if atk_buffer > 0 and not ground and down:
+		atk_buffer = 0
+		slam = true
+		atk = null
+		vel.y = -180
+	elif atk == null and (atk_buffer > 0 or holding):
+		atk_buffer = 0
+		atk = {"step": 0, "t": 0.0, "hit": [], "queued": false}
+		if mouse_aim:
+			facing = _mouse_side()
+		elif absf(ix) > 0.2:
+			facing = int(signf(ix))
+	elif atk != null and atk_buffer > 0:
+		atk_buffer = 0
+		atk.queued = true
+	if atk != null and holding:
+		atk.queued = true
 	if atk != null:
 		atk.t += dt
 		_attack_hits()
@@ -217,7 +251,7 @@ func _physics_process(dt: float) -> void:
 			vel.y = -double_jump_v
 			flip = 0.4
 			game.fx.wing(position, facing)
-	if Input.is_action_just_released("jump") and vel.y < -300 and flip <= 0:
+	if released and vel.y < -300 and flip <= 0:
 		vel.y *= jump_cut
 
 	# --- gravity
@@ -225,6 +259,10 @@ func _physics_process(dt: float) -> void:
 	vel.y = minf(vel.y + gravity * gmul * dt, max_fall)
 	_move(dt, drop_t > 0)
 	run_ph += absf(vel.x) * dt * 0.034
+
+
+func _mouse_side() -> int:
+	return 1 if get_global_mouse_position().x >= global_position.x else -1
 
 
 func _do_jump(v: float) -> void:

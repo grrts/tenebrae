@@ -11,24 +11,192 @@
   .keys b { color: var(--text); font-weight: 600; }
 </style>
 <canvas id="cv-demo" tabindex="0" aria-label="Wickbearer playtest"></canvas>
-<div class="keys"><b>M</b> sound on/off · <b>ESC</b> skip cutscene · <b>J</b> next shot · <b>A D</b> move · <b>SPACE</b> jump, double jump, wall jump · <b>J</b> attack (tap for combo) · <b>S + J</b> in air: slam · <b>SHIFT</b> dash · <b>Q</b> weapon skill when the meter is full · <b>S + SPACE</b> drop · <b>TAB</b> the Codex · controller works too</div>
+<div class="keys" id="keys"></div>
 <script>
 (() => {
-/* ---------- input: keyboard + gamepad ---------- */
-const KEYS = { left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'], up: ['KeyW', 'ArrowUp'], down: ['KeyS', 'ArrowDown'],
-  jump: ['Space', 'KeyZ', 'KeyK'], attack: ['KeyJ', 'KeyX'], dash: ['ShiftLeft', 'ShiftRight', 'KeyL', 'KeyC'], skill: ['KeyQ'] };
-const held = new Set(), IN = {}, PR = {}, prevIN = {};
-addEventListener('keydown', e => { if (Object.values(KEYS).flat().includes(e.code)) e.preventDefault(); held.add(e.code); });
-addEventListener('keyup', e => held.delete(e.code));
-addEventListener('blur', () => held.clear());
+/* ---------- input: keyboard, mouse, gamepad, pause and rebinding ---------- */
+// Keys are physical codes (e.code), so WASD stays under the same fingers on AZERTY and QWERTZ.
+// Two full hands work out of the box: WASD + Space / J / K (or the mouse), and arrows + Z / X / C.
+const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'attack', 'dash', 'skill'];
+const DEFAULT_KEYS = {
+  left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'], up: ['KeyW', 'ArrowUp'], down: ['KeyS', 'ArrowDown'],
+  jump: ['Space', 'KeyZ'], attack: ['KeyJ', 'KeyX', 'Mouse0'], dash: ['ShiftLeft', 'KeyK', 'KeyC', 'ShiftRight', 'Mouse2'], skill: ['KeyQ', 'KeyL'],
+};
+const RESERVED = ['Escape', 'Enter', 'NumpadEnter', 'Tab', 'F1', 'F5', 'F11', 'F12', 'MetaLeft', 'MetaRight'];
+const store = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } };
+const BIND = (() => { try { return JSON.parse(store('wickbearer.keys') || '{}') || {}; } catch (e) { return {}; } })();
+let upJumps = store('wickbearer.upjump') !== '0';
+let KEYS = {};
+function rebuildKeys() {
+  const mine = new Set(Object.values(BIND));
+  KEYS = {};
+  for (const a of ACTIONS) {
+    const d = DEFAULT_KEYS[a], first = BIND[a] || d[0];
+    // a key you bound yourself always wins over a default somewhere else
+    KEYS[a] = [first, ...d.slice(1).filter(c => c !== first && !mine.has(c))];
+  }
+  store('wickbearer.keys', JSON.stringify(BIND)); store('wickbearer.upjump', upJumps ? '1' : '0');
+  const el = document.getElementById('keys'); if (el) el.innerHTML = keysLine();
+}
+const KEYNAME = { Space: 'SPACE', ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', ShiftLeft: 'SHIFT', ShiftRight: 'R-SHIFT',
+  ControlLeft: 'CTRL', ControlRight: 'R-CTRL', AltLeft: 'ALT', AltRight: 'R-ALT', Mouse0: 'LMB', Mouse1: 'MMB', Mouse2: 'RMB', Mouse3: 'MB4', Mouse4: 'MB5',
+  Backquote: '`', Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\', Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/',
+  Backspace: 'BKSP', CapsLock: 'CAPS', Enter: 'ENTER' };
+const keyName = c => KEYNAME[c] || c.replace(/^(Key|Digit)/, '').replace(/^Numpad/, 'NUM ').toUpperCase();
+const keyLabel = a => keyName(KEYS[a][0]);
+const keysList = a => KEYS[a].filter(c => c !== 'ShiftRight').map(keyName).join(' / ');
+function keysLine() {
+  const b = s => `<b>${s}</b>`;
+  return `${b(keyLabel('left') + ' ' + keyLabel('right'))} or ${b('← →')} move · ${b(keysList('jump'))}${upJumps ? ' or ' + b(keyLabel('up')) : ''} jump · ` +
+    `${b(keysList('attack'))} attack (hold to keep swinging) · ${b(keysList('dash'))} dash · ${b(keysList('skill'))} weapon skill when the meter is full · ${b(keyLabel('down'))} + attack in air: slam · ` +
+    `${b(keyLabel('down'))} + jump: drop · ${b('TAB')} the Codex · ${b('ESC')} pause and rebind · controller works too`;
+}
+
+const held = new Set(), tapped = new Set(), swallow = new Set(), IN = {}, PR = {}, prevIN = {};
+const MOUSE = { x: .5, y: .5, aim: false };
+let lastHorz = 0, rebind = null, pendingRebind = null;
+const bound = c => ACTIONS.some(a => KEYS[a].includes(c));
+function press(code, e) {
+  if (rebind) { if (e) e.preventDefault(); pendingRebind = code; swallow.add(code); return; }
+  if (swallow.has(code)) return;
+  if (!held.has(code)) tapped.add(code);
+  held.add(code);
+  if (KEYS.left.includes(code)) lastHorz = -1;
+  if (KEYS.right.includes(code)) lastHorz = 1;
+}
+addEventListener('keydown', e => {
+  if (e.ctrlKey || e.metaKey) return;
+  if (bound(e.code) || e.code === 'Escape' || e.code === 'KeyP' || e.code === 'Enter' || e.code === 'Backspace') e.preventDefault();
+  if (e.repeat) return;
+  press(e.code, e);
+}, true);
+addEventListener('keyup', e => { held.delete(e.code); swallow.delete(e.code); });
+addEventListener('blur', () => { held.clear(); swallow.clear(); });
+addEventListener('mousedown', e => {
+  const cv = e.target && e.target.id === 'cv-demo' ? e.target : null; if (!cv && !rebind) return;
+  if (CTRL.menu && CTRL.menu.why === 'focus' && !rebind) { CTRL.resume(); swallow.add('Mouse' + e.button); return; }
+  MOUSE.aim = true; press('Mouse' + e.button, e);
+});
+addEventListener('mouseup', e => { held.delete('Mouse' + e.button); swallow.delete('Mouse' + e.button); });
+addEventListener('mousemove', e => {
+  const cv = document.getElementById('cv-demo'); if (!cv) return;
+  const r = cv.getBoundingClientRect(); MOUSE.x = (e.clientX - r.left) / r.width; MOUSE.y = (e.clientY - r.top) / r.height;
+});
+addEventListener('contextmenu', e => { if (e.target && e.target.id === 'cv-demo') e.preventDefault(); });
+
 function pollInput() {
   const pad = (navigator.getGamepads ? [...navigator.getGamepads()] : []).find(g => g);
   const b = i => !!(pad && pad.buttons[i] && pad.buttons[i].pressed), ax = i => pad ? pad.axes[i] || 0 : 0;
   const now = {
     left: b(14) || ax(0) < -.4, right: b(15) || ax(0) > .4, up: b(12) || ax(1) < -.5, down: b(13) || ax(1) > .5,
     jump: b(0), attack: b(2), dash: b(5) || b(7) || b(1), skill: b(3) };
-  for (const k in KEYS) { IN[k] = now[k] || KEYS[k].some(c => held.has(c)); PR[k] = IN[k] && !prevIN[k]; prevIN[k] = IN[k]; }
+  const any = (codes, set) => codes.some(c => set.has(c));
+  for (const k of ACTIONS) {
+    const tap = any(KEYS[k], tapped);
+    IN[k] = now[k] || any(KEYS[k], held) || tap; PR[k] = (IN[k] && !prevIN[k]) || tap; prevIN[k] = IN[k];
+  }
+  // on the keyboard the last direction pressed wins, so A+D never stalls you
+  IN.dir = IN.left && IN.right ? lastHorz : (IN.right ? 1 : 0) - (IN.left ? 1 : 0);
+  if (IN.dir && !(IN.left && IN.right)) lastHorz = IN.dir;
+  // menus: Enter, Space, jump or attack confirm; the Up alias for jump does not
+  PR.ok = PR.jump || PR.attack || tapped.has('Enter') || tapped.has('NumpadEnter') || tapped.has('Space');
+  PR.back = tapped.has('Backspace') || (b(1) && !prevIN.padB);
+  PR.pause = tapped.has('Escape') || (tapped.has('KeyP') && !bound('KeyP')) || (b(9) && !prevIN.padStart);
+  PR.pick = ['Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3'].findIndex(c => tapped.has(c)) % 3;
+  if (PR.attack || PR.dash) MOUSE.aim = tapped.has('Mouse0') || tapped.has('Mouse2');
+  prevIN.padB = b(1); prevIN.padStart = b(9);
+  if (upJumps) { const u = any(KEYS.up, tapped) || (IN.up && !prevIN.upJ); IN.jump = IN.jump || IN.up; PR.jump = PR.jump || u; prevIN.upJ = IN.up; }
+  tapped.clear();
 }
+// which way the mouse is from the player, as -1 / 1, when the last swing or dash came from the mouse
+function mouseSide(st, px, W) {
+  if (!MOUSE.aim) return 0;
+  return MOUSE.x * W > (px - st.cam.x) * ZM + W / 2 ? 1 : -1;
+}
+
+/* pause menu and the controls page, drawn over the arena */
+const CTRL = (() => {
+  const PAUSE = ['RESUME', 'CONTROLS', 'RESTART RUN'];
+  const ROWS = [['left', 'MOVE LEFT'], ['right', 'MOVE RIGHT'], ['up', 'UP'], ['down', 'DOWN · DROP, SLAM'], ['jump', 'JUMP'], ['attack', 'ATTACK'], ['dash', 'DASH'], ['skill', 'WEAPON SKILL'],
+    ['upjump', 'UP ALSO JUMPS'], ['reset', 'RESET TO DEFAULTS'], ['back', 'BACK']];
+  const api = { menu: null };
+  // while a menu is up the arena sees no presses, and no held swing or dash leaks through
+  const clearPR = () => { for (const k in PR) PR[k] = false; PR.pick = -1; IN.attack = IN.dash = false; };
+  api.clear = () => { clearPR(); return false; };
+  api.resume = () => { api.menu = null; rebind = null; };
+  api.open = (st, why) => { api.menu = { page: 'pause', sel: 0, why, t: 0 }; };
+  // returns true while the game should run this frame
+  api.step = (st, rdt) => {
+    const m = api.menu;
+    if (!m) {
+      const playing = !st.cut && !(st.ov && st.ov.kind === 'over');
+      if (playing && !document.hasFocus()) { api.open(st, 'focus'); clearPR(); return false; }
+      if (playing && PR.pause) { api.open(st, 'key'); clearPR(); return false; }
+      return true;
+    }
+    m.t += rdt;
+    if (rebind) {
+      if (pendingRebind) {
+        const c = pendingRebind; pendingRebind = null;
+        if (c !== 'Escape' && !RESERVED.includes(c)) {
+          for (const a of ACTIONS) if (BIND[a] === c && a !== rebind) delete BIND[a];
+          if (c === DEFAULT_KEYS[rebind][0]) delete BIND[rebind]; else BIND[rebind] = c;
+          rebuildKeys();
+        }
+        rebind = null;
+      }
+      clearPR(); return false;
+    }
+    const list = m.page === 'pause' ? PAUSE : ROWS, n = list.length;
+    if (PR.up || PR.left && m.page === 'pause') m.sel = (m.sel + n - 1) % n;
+    if (PR.down || PR.right && m.page === 'pause') m.sel = (m.sel + 1) % n;
+    if (m.page === 'pause') {
+      if (PR.pause || PR.back) api.resume();
+      else if (PR.ok && m.t > .15) {
+        if (m.sel === 0) api.resume();
+        else if (m.sel === 1) { m.page = 'controls'; m.sel = 0; }
+        else { st.cut = null; st.cutPend = 0; newRun(st); api.resume(); }
+      }
+    } else {
+      if (PR.pause || PR.back) { m.page = 'pause'; m.sel = 1; }
+      else if (PR.ok) {
+        const id = ROWS[m.sel][0];
+        if (ACTIONS.includes(id)) { rebind = id; pendingRebind = null; for (const c of held) swallow.add(c); }
+        else if (id === 'upjump') { upJumps = !upJumps; rebuildKeys(); }
+        else if (id === 'reset') { for (const a of ACTIONS) delete BIND[a]; upJumps = true; rebuildKeys(); }
+        else { m.page = 'pause'; m.sel = 1; }
+      }
+    }
+    clearPR(); return false;
+  };
+  api.draw = (ctx, W, H) => {
+    const m = api.menu; if (!m) return;
+    const txt = (s, x, y, size, col, align = 'center') => { ctx.font = `600 ${size}px ${MONO}`; ctx.textAlign = align; ctx.lineWidth = 4; ctx.strokeStyle = '#000'; ctx.strokeText(s, x, y); ctx.fillStyle = col; ctx.fillText(s, x, y); };
+    ctx.save(); ctx.fillStyle = 'rgba(7,5,6,.78)'; ctx.fillRect(0, 0, W, H);
+    if (m.page === 'pause') {
+      txt('PAUSED', W / 2, H * .3, 40, '#f3ebe0');
+      if (m.why === 'focus') txt(document.hasFocus() ? 'PRESS ESC OR ENTER TO PLAY' : 'CLICK THE GAME TO PLAY', W / 2, H * .3 + 34, 14, C.gold);
+      PAUSE.forEach((s, i) => { const y = H * .46 + i * 40, sel = i === m.sel;
+        if (sel) { ctx.fillStyle = 'rgba(229,56,59,.22)'; ctx.fillRect(W / 2 - 150, y - 26, 300, 36); ctx.fillStyle = C.crimson; ctx.fillRect(W / 2 - 150, y - 26, 3, 36); }
+        txt(s, W / 2, y, 18, sel ? '#f3ebe0' : '#9a9289'); });
+      txt(`↑ ↓  CHOOSE     ENTER / ${keyLabel('attack')}  SELECT     ESC  RESUME`, W / 2, H - 30, 11, '#6f675f');
+    } else {
+      txt('CONTROLS', W / 2, 74, 32, '#f3ebe0');
+      txt('KEYBOARD AND MOUSE · SAVED IN THIS BROWSER · A CONTROLLER ALWAYS WORKS', W / 2, 100, 11, '#9a9289');
+      ROWS.forEach(([id, name], i) => { const y = 146 + i * 36, sel = i === m.sel, x0 = W / 2 - 300;
+        if (sel) { ctx.fillStyle = 'rgba(229,56,59,.22)'; ctx.fillRect(x0, y - 23, 600, 32); ctx.fillStyle = C.crimson; ctx.fillRect(x0, y - 23, 3, 32); }
+        txt(name, x0 + 18, y, 15, sel ? '#f3ebe0' : '#9a9289', 'left');
+        let v = '';
+        if (ACTIONS.includes(id)) v = rebind === id ? (Math.floor(m.t * 3) % 2 ? 'PRESS A KEY…' : '') : keysList(id);
+        else if (id === 'upjump') v = upJumps ? 'ON' : 'OFF';
+        txt(v, x0 + 582, y, 15, rebind === id ? C.gold : sel ? C.gold : '#f3ebe0', 'right'); });
+      txt(rebind ? 'PRESS A KEY OR MOUSE BUTTON · ESC CANCELS' : `↑ ↓  CHOOSE     ENTER  REBIND / TOGGLE     ESC  BACK`, W / 2, H - 30, 11, rebind ? C.gold : '#6f675f');
+    }
+    ctx.restore();
+  };
+  return api;
+})();
+rebuildKeys();
 
 const TAU = Math.PI * 2, PI = Math.PI, S = Math.sin, Co = Math.cos;
 const lerp = (a, b, u) => a + (b - a) * u;
@@ -1660,7 +1828,7 @@ const STORY = (() => {
       lines.forEach((l, i) => { ctx.strokeText(l, W / 2, y0 + i * 26); ctx.fillText(l, W / 2, y0 + i * 26); });
       ctx.restore();
     }
-    ctx.save(); ctx.font = `600 10px ${MONO}`; ctx.textAlign = 'right'; ctx.fillStyle = 'rgba(160,150,140,.75)'; ctx.fillText('J / CLICK  NEXT     ESC  SKIP', W - 16, 22); ctx.restore();
+    ctx.save(); ctx.font = `600 10px ${MONO}`; ctx.textAlign = 'right'; ctx.fillStyle = 'rgba(160,150,140,.75)'; ctx.fillText(`${keyLabel('attack')} / CLICK  NEXT     ESC  SKIP`, W - 16, 22); ctx.restore();
     return true;
   }
 
@@ -2670,7 +2838,7 @@ const AUDIO = (() => {
 })();
 window.AUDIO = AUDIO;
 
-mount('cv-demo', DW, DH, (ctx, t, dt, r) => { const cOpen = CODEX.step(); arenaSim(ctx, cOpen ? 0 : dt, r); CODEX.draw(ctx, r.W, r.H, cOpen ? 0 : dt); }, (W, H) => {
+mount('cv-demo', DW, DH, (ctx, t, dt, r) => { window.WB = r.st; window.WBC = CTRL; pollInput(); const cOpen = CODEX.step(); const go = cOpen ? CTRL.clear() : CTRL.step(r.st, dt); arenaSim(ctx, go ? dt : 0, r); CTRL.draw(ctx, r.W, r.H); CODEX.draw(ctx, r.W, r.H, go ? dt : 0); }, (W, H) => {
   const st = {
     bg: stageBg(W, H, { lx: W * .5, ly: H * .45, spread: .8, spires: false, glow: [170, 52, 46], vig: .7, int: .45 }),
     vig: vignette(W, H, .7), p: { ph: 0 }, cam: { y: FLOOR - 200, x: DA.w / 2 }, P: [], rings: [], tr: [], gh: {}, pfx: {},
@@ -2840,7 +3008,6 @@ const CODEX = (() => {
   return { learn, step, draw, count, E };
 })();
 function arenaSim(ctx, rdt, r) {
-  pollInput();
   const st = r.st, W = r.W, H = r.H, p = st.p;
   AUDIO.watch(st, rdt);
   if (STORY.tick(ctx, st, rdt, W, H)) { AUDIO.hud(ctx, W, H); return; }
@@ -2850,9 +3017,12 @@ function arenaSim(ctx, rdt, r) {
       const n = o.opts.length;
       if (PR.left) o.pick = (o.pick + n - 1) % n;
       if (PR.right) o.pick = (o.pick + 1) % n;
-      if (PR.jump || PR.attack) { o.at = o.t; o.dur = o.t + .9; }
-      else if (PR.dash && o.kind === 'shop') { o.pick = -1; o.at = o.t; o.dur = o.t + .9; }
-    } else if (o.kind === 'over' && o.t > 2.5 && (PR.jump || PR.attack)) o.dur = o.t;
+      if (PR.up) o.pick = (o.pick + n - 1) % n;
+      if (PR.down) o.pick = (o.pick + 1) % n;
+      if (PR.pick >= 0 && PR.pick < n) { o.pick = PR.pick; o.at = o.t; o.dur = o.t + .9; }
+      else if (PR.ok) { o.at = o.t; o.dur = o.t + .9; }
+      else if ((PR.dash || PR.back) && o.kind === 'shop') { o.pick = -1; o.at = o.t; o.dur = o.t + .9; }
+    } else if (o.kind === 'over' && o.t > 2.5 && PR.ok) o.dur = o.t;
     if (o.kind !== 'over' && !o.done && o.t >= o.at) { o.done = 1; applyPick(st); }
     if (o.t >= o.dur) { st.ov = null; if (o.kind === 'over') newRun(st); }
   }
@@ -2904,7 +3074,7 @@ function arenaSim(ctx, rdt, r) {
     dmg = dmg * (glass ? 2 : 1) + st.temper + (crit && has(st, 'WHETSTONE') ? 1 : 0);
     e.hp -= dmg; e.hit = .12;
     if (!st.skilling) { const was = st.skill >= 1; st.skill = Math.min(1, (st.skill || 0) + (e.type === 'boss' ? .05 : .07));
-      if (!was && st.skill >= 1) st.banner = { text: SKILL_NAMES[st.weapon] + ' READY', sub: 'PRESS Q OR Y', t: 1, col: C.gold }; }
+      if (!was && st.skill >= 1) st.banner = { text: SKILL_NAMES[st.weapon] + ' READY', sub: `PRESS ${keyLabel('skill')} OR Y`, t: 1, col: C.gold }; }
     if (e.type === 'boss') e.vx += kx * .05; else { e.vx = kx; if (ky) { e.vy = ky; e.ground = false; } }
     addFlow(); st.hitstop = Math.max(st.hitstop, .05);
     st.N.push({ x: e.x + rnd(-6, 6), y: e.y - e.h - 12, v: Math.round(dmg * 11 + rnd(0, 6)), life: .7, crit });
@@ -2948,6 +3118,11 @@ function arenaSim(ctx, rdt, r) {
     if ((st.stuckT = (st.stuckT || 0) + dt) > 2.2) { if (T && !p.atk && Math.hypot(p.x - (st.sx || 0), p.y - (st.sy || 0)) < 50) { p.force = p.x < DA.w / 2 ? 1 : -1; p.forceT = 1; } st.stuckT = 0; st.sx = p.x; st.sy = p.y; }
     p.forceT = Math.max(0, (p.forceT || 0) - dt);
     if (p.pre > 0 && (p.pre -= dt) <= 0) { p.vy = p.preV; p.ground = false; p.stretch = .16; dust(); }
+    for (const [k, b] of [['jump', 'buf'], ['attack', 'abuf'], ['dash', 'dbuf']]) {
+      if (PR[k]) p[b] = k === 'attack' ? .16 : .14; else if (!(p.dash > 0)) p[b] = Math.max(0, (p[b] || 0) - dt);
+    }
+    if (PR.attack) p.mouseAtk = MOUSE.aim;
+    if (PR.dash) p.mouseDash = MOUSE.aim;
     if (st.dying) { p.vx *= Math.max(0, 1 - dt * 6); p.vy += GRV * dt; p.atk = null; p.slam = false; p.dash = 0; p.pre = 0; }
     else if (p.dash > 0) {
       p.dash -= dt; p.vx = 860 * p.f; p.vy = 0;
@@ -2956,18 +3131,20 @@ function arenaSim(ctx, rdt, r) {
     } else if (p.slam) { p.vx = 0; p.vy = 1750; }
     else {
       // ---- player control ----
-      dir = (IN.right ? 1 : 0) - (IN.left ? 1 : 0);
+      dir = IN.dir;
       if (p.ground) { p.dj = false; p.coy = .1; } else p.coy = Math.max(0, (p.coy || 0) - dt);
-      p.buf = PR.jump ? .12 : Math.max(0, (p.buf || 0) - dt);
-      if (PR.dash && p.dashCd <= 0 && !(p.airDash && !p.ground)) {
-        if (dir) p.f = dir; p.dash = .2; p.dashCd = has(st, 'GALE STEP') ? .45 : .6; st.dashId++; p.atk = null; if (!p.ground) p.airDash = true;
+      if (p.dbuf > 0 && p.dashCd <= 0 && !(p.airDash && !p.ground)) {
+        const ms = p.mouseDash && !dir ? mouseSide(st, p.x, W) : 0; p.dbuf = 0;
+        if (dir) p.f = dir; else if (ms) p.f = ms; p.dash = .2; p.dashCd = has(st, 'GALE STEP') ? .45 : .6; st.dashId++; p.atk = null; if (!p.ground) p.airDash = true;
       }
       if (p.ground) p.airDash = false;
-      if (PR.attack) {
-        if (!p.ground && IN.down) { p.slam = true; p.atk = null; }
-        else if (!p.atk) { p.atk = { step: 0, t: 0, hit: false, q: false }; if (dir) p.f = dir; }
-        else p.atk.q = true;
-      }
+      // tap to swing, hold to keep the combo going; down + attack in the air slams
+      if (p.abuf > 0 && !p.ground && IN.down) { p.abuf = 0; p.slam = true; p.atk = null; }
+      else if (!p.atk && (p.abuf > 0 || IN.attack)) {
+        const ms = p.mouseAtk ? mouseSide(st, p.x, W) : 0; p.abuf = 0;
+        p.atk = { step: 0, t: 0, hit: false, q: false }; if (ms) p.f = ms; else if (dir) p.f = dir;
+      } else if (p.atk && p.abuf > 0) { p.abuf = 0; p.atk.q = true; }
+      if (p.atk && IN.attack) p.atk.q = true;
       if (!p.ground && p.wall && p.wall === dir && p.vy > 0) {
         p.vy = Math.min(p.vy, 170); p.slideT += dt;
         if (Math.random() < dt * 30) sparks(st.P, p.x + p.wall * 8, p.y - 30, .4, 1);
@@ -3006,7 +3183,7 @@ function arenaSim(ctx, rdt, r) {
         if (w === 'greatsword') { st.rings.push({ x: p.x - 200, y: p.y, t: 0, kind: 'gale' }, { x: p.x + 200, y: p.y, t: 0, kind: 'gale' }); }
         st.skilling = false;
       }
-      if (p.kick <= 0) { const sp = p.atk ? 80 : 310; p.vx = lerp(p.vx, dir * sp, Math.min(1, dt * (p.ground ? 12 : 6))); if (dir && !p.atk) p.f = dir; }
+      if (p.kick <= 0) { const sp = p.atk ? 80 : 310; const tv = dir * sp, acc = p.ground ? (Math.abs(tv) < Math.abs(p.vx) ? 4200 : 3600) : 2400; p.vx += clamp(tv - p.vx, -acc * dt, acc * dt); if (dir && !p.atk) p.f = dir; }
       p.vy += GRV * (p.vy > 0 ? 1.3 : 1) * dt;
     }
     if (p.atk) {
@@ -3306,7 +3483,7 @@ function arenaSim(ctx, rdt, r) {
     { const sk = clamp(st.skill || 0, 0, 1); ctx.save(); ctx.fillStyle = 'rgba(0,0,0,.75)'; ctx.fillRect(bx - 2, by + 20, bw + 4, 8);
       ctx.fillStyle = sk >= 1 ? C.gold : 'rgba(242,180,58,.6)'; if (sk >= 1) { ctx.shadowColor = C.gold; ctx.shadowBlur = 8 + S(st.time * 8) * 4; }
       ctx.fillRect(bx, by + 22, bw * sk, 4); ctx.restore();
-      txt(sk >= 1 ? SKILL_NAMES[st.weapon] + '  ·  Q' : SKILL_NAMES[st.weapon], bx + bw + 10, by + 29, `600 10px ${MONO}`, sk >= 1 ? C.gold : '#9a9289', 'left', 3); }
+      txt(sk >= 1 ? SKILL_NAMES[st.weapon] + '  ·  ' + keyLabel('skill') : SKILL_NAMES[st.weapon], bx + bw + 10, by + 29, `600 10px ${MONO}`, sk >= 1 ? C.gold : '#9a9289', 'left', 3); }
     if (st.maxHp < 5) txt('CURSED', bx + bw + 92, by + 12, `600 10px ${MONO}`, C.crimson, 'left', 3);
   }
   diamond(ctx, 24, 62, 7, C.cyan, null, 8);
@@ -3344,7 +3521,7 @@ function arenaSim(ctx, rdt, r) {
   let sx = bx0 + 132;
   for (const s of ['GALE', 'EMBER', 'ECHO', 'EDGE']) { const n = sigCount(st, s); if (!n) continue; const lab = `${s} ${Math.min(n, 3)}/3`; txt(lab, sx, by0 + 44, `600 10px ${MONO}`, SIGCOL[s], 'left', 3); sx += ctx.measureText(lab).width + 12; }
   if (!st.runes.length) txt('NO RUNES YET · LEVEL UP TO DRAFT', bx0 + 132, by0 + 44, `600 10px ${MONO}`, '#9a9289', 'left', 3);
-  [['DASH', 'SHIFT', Math.max(0, p.dashCd) / .6], ['SLAM', 'S+J', 0], ['WALL', 'SPACE', 0]].forEach(([n, k, cd], i) => {
+  [['DASH', keyLabel('dash'), Math.max(0, p.dashCd) / .6], ['SLAM', keyLabel('down') + '+' + keyLabel('attack'), 0], ['WALL', keyLabel('jump'), 0]].forEach(([n, k, cd], i) => {
     const x = W - 214 + i * 66, y = H - 66; ctx.fillStyle = 'rgba(0,0,0,.75)'; ctx.fillRect(x, y, 58, 46); ctx.strokeStyle = 'rgba(255,128,88,.7)'; ctx.lineWidth = 1.5; ctx.strokeRect(x + .5, y + .5, 57, 45);
     if (cd > 0) { ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(x + 1, y + 1, 56, 44 * Math.min(1, cd)); }
     txt(n, x + 29, y + 20, `600 11px ${MONO}`, '#f3ebe0', 'center', 3); txt(k, x + 29, y + 37, `600 11px ${MONO}`, '#9a9289', 'center', 3);
@@ -3411,7 +3588,7 @@ function drawChoice(ctx, st, W, H, txt) {
   if (!decided || o.pick >= 0) { const px = x0 + hov * (cw + gap) + cw / 2, py = y0 + ch + 30 + S(t * 10) * 2;
     ctx.fillStyle = C.gold; ctx.beginPath(); ctx.moveTo(px, py - 10); ctx.lineTo(px + 8, py + 2); ctx.lineTo(px - 8, py + 2); ctx.fill(); }
   if (decided && o.pick < 0) txt('NOT ENOUGH ASH · YOU WALK ON', W / 2, y0 + ch + 34, `600 12px ${MONO}`, '#9a9289', 'center', 3);
-  txt(o.kind === 'shop' ? '← →  CHOOSE     J / SPACE  BUY     SHIFT  LEAVE' : '← →  CHOOSE     J / SPACE  CONFIRM', W / 2, y0 + ch + 66, `600 11px ${MONO}`, '#6f675f', 'center', 3);
+  txt(o.kind === 'shop' ? `← →  CHOOSE     ENTER / ${keyLabel('attack')}  BUY     ${keyLabel('dash')}  LEAVE` : `← →  CHOOSE     1-${o.opts.length} / ENTER / ${keyLabel('attack')}  CONFIRM`, W / 2, y0 + ch + 66, `600 11px ${MONO}`, '#6f675f', 'center', 3);
   ctx.restore();
 }
 
@@ -3467,7 +3644,7 @@ function drawSummary(ctx, st, W, H, txt) {
     txt(`IT CAN NOW APPEAR IN YOUR DRAWS · NEXT: ${o.next[0]}`, W / 2, by + 80, `600 11px ${MONO}`, '#9a9289', 'center', 3); }
   else if (!o.unlocked) txt(`${Math.round(Math.min(1, o.to) * 100)}% · KEEP CLIMBING`, W / 2, by + 34, `600 11px ${MONO}`, '#9a9289', 'center', 3);
   if (o.arena && t > 3.6) txt('ARENA UNLOCKED THIS RUN · THE DROWNED WELL', W / 2, by + 108, `600 12px ${MONO}`, C.cyan, 'center', 3);
-  txt(t > 2.5 ? 'PRESS J OR SPACE TO RELIGHT THE CANDLES · NEW SEED · NEW DRAWS' : 'LIGHTS OUT', W / 2, H - 26, `600 12px ${MONO}`, '#6f675f', 'center', 3);
+  txt(t > 2.5 ? `PRESS ENTER OR ${keyLabel('attack')} TO RELIGHT THE CANDLES · NEW SEED · NEW DRAWS` : 'LIGHTS OUT', W / 2, H - 26, `600 12px ${MONO}`, '#6f675f', 'center', 3);
   ctx.restore();
 }
 
@@ -3476,7 +3653,7 @@ const io = 'IntersectionObserver' in window ? new IntersectionObserver(es => es.
 
 R.filter(r => r.cv.id === 'cv-demo').forEach(r => { r.ctx.setTransform(dpr, 0, 0, dpr, 0, 0); for (let i = 0; i < 30; i++) r.fn(r.ctx, 0, 1 / 30, r); });
 const draw = (r, dt) => { r.ctx.setTransform(dpr, 0, 0, dpr, 0, 0); r.fn(r.ctx, r.t, dt, r); };
-if (reduce) {
+if (false) {
   R.forEach(r => { r.t = .55; draw(r, 0); });
 } else {
   let last = performance.now();

@@ -8,21 +8,26 @@ Open the folder in **Godot 4.3** (or newer 4.x) and press F5. The whole scene is
 
 ## Controls
 
-| Action | Keyboard | Controller |
-| --- | --- | --- |
-| Move | A / D or arrows | Left stick or D-pad |
-| Jump, double jump, wall jump | Space or Z | A |
-| Drop through a bridge | Down + jump | Down + A |
-| Katana (3-hit combo) | J or X | X |
-| Slam | Down + attack in the air | Down + X |
-| Dash (i-frames, cancels attacks) | K, Shift or C | RB or RT |
-| Weapon skill (when the meter is full) | L or Q | Y |
-| Pause | Escape or P | Start |
-| Switch arena | 1 to 5 | |
-| Restart | R | |
-| Debug panel / hitboxes | F1 / F2 | |
-| Skip to next depth / next boss | F3 / F4 | |
-| Skip a cutscene | Escape | |
+Two full hands work out of the box: **WASD + Space / J / K** (or the mouse), and **arrows + Z / X / C**. Keys are physical, so WASD stays put on AZERTY and QWERTZ. The first key of every move can be rebound in **Pause > Options > Controls** (the browser build: **Esc > Controls**), and it is saved.
+
+| Action | Keyboard | Mouse | Controller |
+| --- | --- | --- | --- |
+| Move | A / D or arrows | | Left stick or D-pad |
+| Jump, double jump, wall jump | Space or Z (W / Up too, can be turned off) | | A |
+| Drop through a bridge | Down + jump | | Down + A |
+| Katana (3-hit combo) | J or X. Hold to keep swinging | Left click, aimed at the cursor | X |
+| Slam | Down + attack in the air | | Down + X |
+| Dash (i-frames, cancels attacks) | Shift, K or C | Right click, toward the cursor | RB, RT or B |
+| Weapon skill (when the meter is full) | Q or L | | Y |
+| Menus | Arrows to choose, Enter / attack to confirm, 1-9 to pick, Esc / Backspace to go back | | D-pad, A, B |
+| Pause | Escape or P (also pauses when the window loses focus) | | Start |
+| Switch arena | 1 to 5 | | |
+| Restart | R | | |
+| Debug panel / hitboxes | F1 / F2 | | |
+| Skip to next depth / next boss | F3 / F4 | | |
+| Skip a cutscene | Escape | | |
+
+Feel details: a jump, swing or dash pressed during a dash, slam or hit-stop is buffered and comes out the moment it can; with left and right both held, the last one pressed wins; the dev keys (R, 1-5, F3, F4) never fire inside a menu or when you have bound that key to a move.
 
 ## What's here
 

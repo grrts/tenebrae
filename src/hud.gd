@@ -33,6 +33,7 @@ var toasts: Array = []
 var hp_show := 1.0
 var flash_col := Color.WHITE
 var flash_t := 0.0
+var _digit_held := [false, false, false, false, false, false, false, false, false]
 
 
 func busy() -> bool:
@@ -73,8 +74,9 @@ func _card_start() -> void:
 		game.shake(0.35, 14)
 
 
-func open_choice(title: String, sub: String, opts: Array, cb: Callable) -> void:
-	menu = {"title": title, "sub": sub, "opts": opts, "pick": 0, "cb": cb, "t": 0.0}
+## cancel runs on Escape / Backspace / B; without one those keys do nothing here.
+func open_choice(title: String, sub: String, opts: Array, cb: Callable, cancel := Callable()) -> void:
+	menu = {"title": title, "sub": sub, "opts": opts, "pick": 0, "cb": cb, "t": 0.0, "cancel": cancel}
 
 
 func open_summary(data: Dictionary) -> void:
@@ -110,7 +112,9 @@ func _input(event: InputEvent) -> void:
 
 ## The on-screen name of the button for an action, for whichever device was used last.
 func btn(action: String) -> String:
-	return PAD_NAMES[action] if pad else KEY_NAMES[action]
+	if pad:
+		return PAD_NAMES[action]
+	return game.key_label(action) if action in game.REBINDABLE else KEY_NAMES[action]
 
 
 func _process(dt: float) -> void:
@@ -133,14 +137,14 @@ func _process(dt: float) -> void:
 			game.vigil = maxi(0, game.vigil - 1)
 		if Input.is_action_just_pressed("right"):
 			game.vigil = mini(game.vigil_max, game.vigil + 1)
-		if title_screen.t > 0.4 and (Input.is_action_just_pressed("jump") or Input.is_action_just_pressed("attack")):
+		if title_screen.t > 0.4 and game.ok_pressed():
 			var tcb: Callable = title_screen.cb
 			title_screen = null
 			tcb.call()
 	elif scene != null:
 		scene.t += dt
 		var c: Dictionary = scene.cards[scene.i]
-		var press: bool = scene.t > 0.35 and (Input.is_action_just_pressed("jump") or Input.is_action_just_pressed("attack"))
+		var press: bool = scene.t > 0.35 and game.ok_pressed()
 		var skip := Input.is_action_just_pressed("ui_cancel")
 		if skip or press or scene.t > _card_dur(c):
 			scene.i += 1
@@ -154,17 +158,33 @@ func _process(dt: float) -> void:
 	elif menu != null:
 		menu.t += dt
 		var n: int = menu.opts.size()
-		if Input.is_action_just_pressed("left"):
-			menu.pick = (menu.pick + n - 1) % n
-		if Input.is_action_just_pressed("right"):
-			menu.pick = (menu.pick + 1) % n
-		if menu.t > 0.3 and (Input.is_action_just_pressed("jump") or Input.is_action_just_pressed("attack")):
-			var m = menu
+		if menu.get("locked", false):
+			pass
+		elif menu.t > 0.15 and menu.cancel.is_valid() and (Input.is_action_just_pressed("pause") or Input.is_action_just_pressed("back")):
+			var mc = menu
 			menu = null
-			m.cb.call(m.pick)
+			mc.cancel.call()
+		else:
+			if Input.is_action_just_pressed("left") or Input.is_action_just_pressed("up"):
+				menu.pick = (menu.pick + n - 1) % n
+			if Input.is_action_just_pressed("right") or Input.is_action_just_pressed("down"):
+				menu.pick = (menu.pick + 1) % n
+			# 1-9 pick and confirm in one press
+			var direct := -1
+			for d in mini(n, 9):
+				if Input.is_physical_key_pressed(KEY_1 + d) and not game.is_bound(KEY_1 + d) and menu.t > 0.3 and not _digit_held[d]:
+					direct = d
+			for d in 9:
+				_digit_held[d] = Input.is_physical_key_pressed(KEY_1 + d)
+			if direct >= 0:
+				menu.pick = direct
+			if menu.t > 0.3 and (direct >= 0 or game.ok_pressed()):
+				var m = menu
+				menu = null
+				m.cb.call(m.pick)
 	elif summary != null:
 		summary.t += dt
-		if summary.t > 1.2 and (Input.is_action_just_pressed("jump") or Input.is_action_just_pressed("attack")):
+		if summary.t > 1.2 and game.ok_pressed():
 			summary = null
 			game.start(0)
 	elif Input.is_action_just_pressed("pause") and game.player != null and not game.player.dead:
@@ -287,7 +307,7 @@ func _step_codex(dt: float) -> void:
 		c.pick = (c.pick + n - 1) % n
 	if Input.is_action_just_pressed("down"):
 		c.pick = (c.pick + 1) % n
-	if c.t > 0.25 and (Input.is_action_just_pressed("dash") or Input.is_action_just_pressed("pause") or Input.is_action_just_pressed("skill")):
+	if c.t > 0.25 and (Input.is_action_just_pressed("dash") or Input.is_action_just_pressed("pause") or Input.is_action_just_pressed("back") or Input.is_action_just_pressed("skill")):
 		codex = null
 
 
@@ -335,10 +355,10 @@ func _step_reliquary(dt: float) -> void:
 		r.pick = (r.pick + n - 1) % n
 	if Input.is_action_just_pressed("down"):
 		r.pick = (r.pick + 1) % n
-	if r.t > 0.25 and (Input.is_action_just_pressed("dash") or Input.is_action_just_pressed("pause")):
+	if r.t > 0.25 and (Input.is_action_just_pressed("dash") or Input.is_action_just_pressed("pause") or Input.is_action_just_pressed("back")):
 		reliquary = null
 		return
-	if r.t > 0.25 and (Input.is_action_just_pressed("jump") or Input.is_action_just_pressed("attack")):
+	if r.t > 0.25 and game.ok_pressed():
 		var rel: Dictionary = RunData.RELICS[r.pick]
 		if rel.id in game.relics:
 			r.msg = "ALREADY YOURS"
@@ -445,6 +465,27 @@ func _paint_menu(vp: Vector2) -> void:
 	_text(menu.title, Vector2(vp.x / 2, 110), 40, Color("#f3ebe0"), true)
 	_text(menu.sub, Vector2(vp.x / 2, 140), 14, Color(0.6, 0.57, 0.54), true)
 	var n: int = menu.opts.size()
+	var foot := ("WAITING FOR A KEY  ·  ESC CANCELS" if menu.get("locked", false) else
+		("D-PAD  CHOOSE      A  CONFIRM%s" % ("      B  BACK" if menu.cancel.is_valid() else "")) if pad else
+		"ARROWS  CHOOSE      %s / ENTER / 1-%d  CONFIRM%s" % [game.key_label("attack"), mini(9, menu.opts.size()), "      ESC  BACK" if menu.cancel.is_valid() else ""])
+	if n > 7:
+		# long menus (Controls) are a list: name on the left, value on the right, the picked row's note under the title
+		_text(String(menu.opts[menu.pick].desc), Vector2(vp.x / 2, 166), 14, Color(0.85, 0.8, 0.75), true)
+		var rh := minf(40.0, (vp.y - 250) / n)
+		var lx := vp.x / 2 - 320
+		for i in n:
+			var o: Dictionary = menu.opts[i]
+			var rr := Rect2(lx, 190 + i * rh, 640, rh - 6)
+			var on: bool = i == menu.pick
+			canvas.draw_rect(rr, Color(0.06, 0.05, 0.07, 1))
+			canvas.draw_rect(rr, Color("#f2b43a") if on else Color(0.3, 0.26, 0.25), false, 2.0 if on else 1.0)
+			var ty := rr.position.y + rr.size.y / 2 + 6
+			_text(o.name, Vector2(lx + 16, ty), 16, Color("#f3ebe0") if on else Color(0.7, 0.66, 0.62))
+			var v := String(o.get("value", ""))
+			if v != "":
+				_text(v, Vector2(lx + 624 - font.get_string_size(v, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x, ty), 16, Color("#f2b43a") if on else Color("#f3ebe0"))
+		_text(foot, Vector2(vp.x / 2, vp.y - 26), 13, Color(0.5, 0.47, 0.44), true)
+		return
 	var gap := 26.0 if n <= 4 else 14.0
 	var cw := minf(240.0, (vp.x - 60 - (n - 1) * gap) / n)
 	var x0 := (vp.x - n * cw - (n - 1) * gap) / 2
@@ -467,7 +508,7 @@ func _paint_menu(vp: Vector2) -> void:
 				line = ""
 			line += " " + wd
 		_text(line.strip_edges(), Vector2(r.position.x + cw / 2, y), 15, Color(0.85, 0.8, 0.75), true)
-	_text("LEFT / RIGHT  CHOOSE      %s  CONFIRM" % btn("jump"), Vector2(vp.x / 2, 500), 13, Color(0.5, 0.47, 0.44), true)
+	_text(foot, Vector2(vp.x / 2, 500), 13, Color(0.5, 0.47, 0.44), true)
 
 
 func _paint_summary(vp: Vector2) -> void:
