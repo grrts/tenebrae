@@ -99,6 +99,9 @@ func show_banner(text: String, sub: String, t := 1.6) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# F10 hides the HUD for trailer and screenshot capture
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F10:
+		visible = not visible
 	if event is InputEventJoypadButton and event.pressed:
 		pad = true
 	elif event is InputEventJoypadMotion and absf(event.axis_value) > 0.5:

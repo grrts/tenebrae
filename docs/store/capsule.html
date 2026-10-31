@@ -1,0 +1,16 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Cormorant+Garamond:ital,wght@1,500&display=block" rel="stylesheet">
+<style>
+html,body{margin:0;background:#000}
+.cap{position:relative;overflow:hidden;background:#050304 url(art.png) 88% 50%/cover no-repeat}
+.cap::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,rgba(0,0,0,.92) 0%,rgba(0,0,0,.7) 35%,transparent 60%),radial-gradient(ellipse at 65% 55%,transparent 35%,rgba(0,0,0,.8) 100%)}
+.logo{position:absolute;z-index:2;text-align:left;font-family:Cinzel,serif;font-weight:900;color:#f3ebe0;letter-spacing:.06em;text-shadow:0 0 18px rgba(255,150,60,.55),0 2px 0 #000}
+.sub{position:absolute;z-index:2;text-align:left;font-family:'Cormorant Garamond',serif;font-style:italic;color:#f2b43a;text-shadow:0 1px 2px #000}
+</style></head><body>
+<div id="c" class="cap"><div class="logo" id="l">WICKBEARER</div><div class="sub" id="s">Bring the hidden flame home</div></div>
+<script>
+const [w,h]=location.hash.slice(1).split('x').map(Number), c=document.getElementById('c'), l=document.getElementById('l'), s=document.getElementById('s');
+c.style.width=w+'px'; c.style.height=h+'px';
+const fs=Math.min(w*0.068,h*0.17); l.style.fontSize=fs+'px'; l.style.left=s.style.left=(w*0.05)+'px'; l.style.top=(h*0.5-fs*0.75)+'px'; s.style.fontSize=fs*0.36+'px'; s.style.top=(h*0.5+fs*0.35)+'px';
+if(h<200) s.style.display='none';
+</script></body></html>

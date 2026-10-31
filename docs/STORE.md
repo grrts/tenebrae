@@ -58,6 +58,26 @@ Action Roguelike, Roguelite, 2D Platformer, Hack and Slash, Stickman, Dark Fanta
 | Screenshots | 1920 × 1080, at least 5 | One per dungeon plus a boss reveal card |
 | Trailer | 1080p, 60 to 90 s | Open on a slam, end on the candle going out |
 
+Drafts of the header, small and main capsules are in `docs/store/`, cut from a real Saint Umber frame of the browser build. `docs/store/capsule.html` lays the logo over any frame saved as `art.png` next to it; open it with `#920x430` (or any size) in the address. Final capsules should be painted at full resolution from the same composition.
+
+## Trailer shot list (75 seconds)
+
+Capture at 1080p60 from the Godot build with the HUD off (F10 toggles it) except where noted. Music: the boss theme, cut to the hits.
+
+| Time | Shot | Notes |
+| --- | --- | --- |
+| 0:00 to 0:04 | Black. One candle. It goes out. | Sound only: the snuff, then silence |
+| 0:04 to 0:10 | Prologue cards: "Fifteen candles hold back the Hush." Umber takes the flame. | The ZAN impact card on the cut |
+| 0:10 to 0:14 | The wickbearer opens its eyes in the soot | Hard cut to gameplay on the first footstep |
+| 0:14 to 0:26 | Movement montage: wall jump chain, double jump flip, dash through a Gloomwing, drop through a ledge, slam onto a Brute | One move per beat, each about 2 s |
+| 0:26 to 0:34 | One weapon each: katana combo, greatsword arc, spear thrust, dagger air combo, sickle pull | Weapon name on screen, small, lower left |
+| 0:34 to 0:42 | Weapon skills: Iaido, Earthsplitter, Skyward, Flurry, Reap | Meter full flash with the HUD on for the first one |
+| 0:42 to 0:48 | Rune draft, a cursed rune pick, the shade merchant | HUD on |
+| 0:48 to 0:52 | Four dungeon establishing shots, one second each | Pit, Well, Bladeworks, Throne |
+| 0:52 to 1:04 | Boss reveals: GASHAN! DOBAAN! GAKIIN! then DOM! and Saint Umber's crown lighting | Fast cuts on each impact word |
+| 1:04 to 1:10 | Last fight: the wickbearer slams down on Umber, white flash | Hit-stop held two frames longer than in game |
+| 1:10 to 1:15 | WICKBEARER logo. "Bring the hidden flame home." Wishlist on Steam. | Logo over the last candle relighting |
+
 ## Before the page goes live
 
 - Trademark check on the name WICKBEARER (see the project plan).
