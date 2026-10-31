@@ -33,7 +33,7 @@ function keysLine() {
   const b = s => `<b>${s}</b>`;
   return `${b(keyLabel('left') + ' ' + keyLabel('right'))} or ${b('← →')} move · ${b(keysList('jump'))}${upJumps ? ' or ' + b(keyLabel('up')) : ''} jump · ` +
     `${b(keysList('attack'))} attack (hold to keep swinging) · ${b(keysList('dash'))} dash · ${b(keysList('skill'))} weapon skill when the meter is full · ${b(keyLabel('down'))} + attack in air: slam · ` +
-    `${b(keyLabel('down'))} + jump: drop · ${b('ESC')} pause and rebind · controller works too`;
+    `${b(keyLabel('down'))} + jump: drop · ${b('TAB')} the Codex · ${b('ESC')} pause and rebind · controller works too`;
 }
 
 const held = new Set(), tapped = new Set(), swallow = new Set(), IN = {}, PR = {}, prevIN = {};
@@ -106,6 +106,7 @@ const CTRL = (() => {
   const api = { menu: null };
   // while a menu is up the arena sees no presses, and no held swing or dash leaks through
   const clearPR = () => { for (const k in PR) PR[k] = false; PR.pick = -1; IN.attack = IN.dash = false; };
+  api.clear = () => { clearPR(); return false; };
   api.resume = () => { api.menu = null; rebind = null; };
   api.open = (st, why) => { api.menu = { page: 'pause', sel: 0, why, t: 0 }; };
   // returns true while the game should run this frame

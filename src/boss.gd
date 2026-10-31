@@ -15,11 +15,14 @@ extends Enemy
 ##
 ## Each boss picks its moves by range (mirrors web/ai.js), and every wind-up
 ## paints its danger zone on the floor:
-##   Warden  smash, a low chain sweep you jump (both sides when hurt), a double smash when hurt
+##   Warden  smash, a low chain sweep you jump (both sides when hurt), a double smash when hurt,
+##           and from range a chain that drags you in for a smash
 ##   King    leaps at where you're going, smash, hex rain when hurt
 ##   Jarl    a dash across the arena from range, smash, sweep, leaps when hurt
 ##   Umber   blinks behind you and slashes, leaps, hex rain, smash
-## All of them punish standing on their head with an uppercut.
+## All of them punish standing on their head with an uppercut. At half health
+## each roars and calls two of its dungeon's enemies, and below a quarter it
+## strings moves together without walking in between.
 
 @export var walk_speed := 75.0
 @export var quake_speed := 560.0
@@ -66,6 +69,10 @@ func _physics_process(dt: float) -> void:
 	var dy := p.position.y - position.y
 	var enraged := hp < max_hp / 2
 	var l := smarts()
+	# at half health it roars and calls its dungeon's dead to fight beside it
+	if enraged and not called and ground and (state == "walk" or state == "smash"):
+		called = true
+		_call_adds()
 	match state:
 		"fall":
 			if ground and not landed:
@@ -79,19 +86,7 @@ func _physics_process(dt: float) -> void:
 			var want := 0.0 if absf(dx) < 70 else facing * walk_speed * (1.25 if enraged else 1.0)
 			vel.x = move_toward(vel.x, want, 400 * dt)
 			if t <= 0 and ground:
-				var k := _pick(dx, dy, enraged)
-				last = k
-				_wind(k, enraged)
-				if k == "leap":
-					var T := 2 * 900 / gravity
-					leap_to = Vector2(clampf(p.position.x + p.vel.x * T * (0.5 + 0.4 * l), 60, game.world.size.x - 60), position.y)
-				elif k == "rain":
-					var n := 7 if enraged else 5
-					var c := p.position.x + clampf(p.vel.x * 0.5, -160, 160)
-					rain_x.clear()
-					rain_y = p.position.y
-					for i in n:
-						rain_x.append(clampf(c + (i - (n - 1) / 2.0) * 68, 40, game.world.size.x - 40))
+				_start(_pick(dx, dy, enraged), enraged)
 		"wind":
 			vel.x = move_toward(vel.x, 0, 1600 * dt)
 			if next_move in ["sweep", "upper", "smash"] and t > wind_t * 0.5:
@@ -115,6 +110,27 @@ func _physics_process(dt: float) -> void:
 					for k in n:
 						var tgt := p.position + Vector2((k - (n - 1) / 2.0) * 90 + clampf(p.vel.x * 0.5, -120, 120), -30)
 						game.fire_hex(position + Vector2(0, -120), tgt)
+		"pull":
+			# the chain runs out along the floor; whoever it catches is dragged in for a smash
+			vel.x = 0
+			chain_x += facing * 1100 * dt
+			if randf() < 0.9:
+				game.fx.spark(Vector2(chain_x, position.y - 30))
+			var pp := p.position
+			if not caught and p.dash <= 0 and p.invuln <= 0 and absf(pp.x - chain_x) < 30 and pp.y - 56 < position.y - 10 and pp.y > position.y - 80:
+				caught = true
+				p.vel = Vector2(signf(position.x - pp.x) * 760, -260)
+				p.ground = false
+				p.wall_lock_t = 0.35
+				p.atk = null
+				game.shake(0.25, 10)
+			if caught:
+				_wind("smash", true)
+				t = 0.32
+				wind_t = 0.32
+			elif absf(chain_x - position.x) > 460 or game.world.is_solid(game.world.cell(chain_x), game.world.cell(position.y - 30)):
+				state = "smash"
+				t = 0.45
 		"dash":
 			vel.x = facing * 940
 			if randf() < 0.8:
@@ -133,7 +149,12 @@ func _physics_process(dt: float) -> void:
 					_wind("smash", true)
 					t = 0.38
 					wind_t = 0.38
+				elif hp < max_hp / 4 and ground and not combo and randf() < 0.65:
+					# below a quarter health it strings moves together without walking
+					combo = true
+					_start(_pick(dx, dy, true), true)
 				else:
+					combo = false
 					state = "walk"
 					t = (randf_range(0.7, 1.2) if enraged else randf_range(1.1, 1.8)) - 0.3 * l
 	vel.y = minf(vel.y + gravity * dt, 1400)
@@ -144,11 +165,15 @@ func _physics_process(dt: float) -> void:
 		p.take_hit(position.x)
 
 
-const WIND := {"smash": 0.75, "sweep": 0.55, "leap": 0.45, "dash": 0.6, "slash": 0.4, "rain": 0.6, "upper": 0.32, "blink": 0.2}
+const WIND := {"pull": 0.55, "smash": 0.75, "sweep": 0.55, "leap": 0.45, "dash": 0.6, "slash": 0.4, "rain": 0.6, "upper": 0.32, "blink": 0.2}
 var last := ""
 var wind_t := 0.75
 var chain := 0
 var chained := false
+var combo := false
+var called := false
+var caught := false
+var chain_x := 0.0
 var leap_to := Vector2.ZERO
 var rain_x: Array[float] = []
 var rain_y := 0.0
@@ -167,6 +192,8 @@ func _pick(dx: float, dy: float, enraged: bool) -> String:
 				o.append(["sweep", 2.2])
 			if enraged:
 				o.append(["leap", 0.8])
+			if adx > 220 and adx < 440 and absf(dy) < 50:
+				o.append(["pull", 2.4])
 		1:
 			o.append_array([["leap", 2.6], ["smash", 1.0]])
 			if enraged:
@@ -194,6 +221,46 @@ func _pick(dx: float, dy: float, enraged: bool) -> String:
 		if r <= 0:
 			return q[0]
 	return "smash"
+
+
+func _start(k: String, enraged: bool) -> void:
+	var p := game.player
+	last = k
+	_wind(k, enraged)
+	if k == "leap":
+		var T := 2 * 900 / gravity
+		leap_to = Vector2(clampf(p.position.x + p.vel.x * T * (0.5 + 0.4 * smarts()), 60, game.world.size.x - 60), position.y)
+	elif k == "rain":
+		var n := 7 if enraged else 5
+		var c := p.position.x + clampf(p.vel.x * 0.5, -160, 160)
+		rain_x.clear()
+		rain_y = p.position.y
+		for i in n:
+			rain_x.append(clampf(c + (i - (n - 1) / 2.0) * 68, 40, game.world.size.x - 40))
+
+
+const ADDS := [Enemy.Kind.HOLLOW, Enemy.Kind.DROWNED, Enemy.Kind.FORGED, Enemy.Kind.SNUFFER]
+
+
+func _call_adds() -> void:
+	game.shake(0.5, 14)
+	game.fx.ring(position + Vector2(0, -60), 260, accent)
+	game.hud.show_banner("IT CALLS ITS DEAD", "THE BOSS IS ENRAGED", 1.6)
+	var wd := game.world
+	for sd in [-1, 1]:
+		var x := clampf(position.x + sd * 170, 60, wd.size.x - 60)
+		if not (wd.is_solid(wd.cell(x), wd.cell(position.y + 2)) or wd.is_one(wd.cell(x), wd.cell(position.y + 2))) or wd.is_solid(wd.cell(x), wd.cell(position.y - 30)):
+			continue
+		var e := Enemy.new()
+		e.game = game
+		e.setup(ADDS[idx], game.hp_mul())
+		e.position = Vector2(x, position.y)
+		e.facing = -sd
+		game.add_child(e)
+		game.move_child(e, wd.get_index() + 1)
+		e.reset_physics_interpolation()
+		game.enemies.append(e)
+		game.fx.burst(e.position + Vector2(0, -30), 14, accent, 160)
 
 
 func _wind(k: String, enraged: bool) -> void:
@@ -249,6 +316,11 @@ func _do(k: String, dx: float, enraged: bool) -> void:
 			ground = false
 			if absf(vel.x) > 1:
 				facing = 1 if vel.x > 0 else -1
+		"pull":
+			state = "pull"
+			chain_x = position.x + facing * 30
+			caught = false
+			facing = 1 if dx > 0 else -1
 		"dash":
 			state = "dash"
 			t = 0.55
@@ -375,6 +447,8 @@ func _draw() -> void:
 					draw_rect(Rect2(minf(0, sd * 250), -54, 250, 54), zc)
 			"slash":
 				draw_rect(Rect2(minf(0, facing * 160), -130, 160, 130), zc)
+			"pull":
+				draw_rect(Rect2(minf(0, facing * 460), -80, 460, 70 * kk), zc)
 			"upper":
 				draw_rect(Rect2(-80, -300, 160, 300), zc)
 			"dash":
@@ -386,6 +460,10 @@ func _draw() -> void:
 			"rain":
 				for x in rain_x:
 					_ellipse(Vector2(x, rain_y) - position, 18, zc)
+	if state == "pull":
+		var tip := Vector2(chain_x - position.x, -30)
+		draw_line(Vector2(facing * 20, -70), tip, Color("#c9c2b8"), 3)
+		draw_circle(tip, 7, Color("#c9c2b8"))
 	if state == "leap":
 		_ellipse(leap_to - position, 120, Color(0.9, 0.22, 0.23, 0.3))
 	# shockwaves are drawn in local space

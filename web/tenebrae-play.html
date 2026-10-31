@@ -49,7 +49,7 @@ function keysLine() {
   const b = s => `<b>${s}</b>`;
   return `${b(keyLabel('left') + ' ' + keyLabel('right'))} or ${b('← →')} move · ${b(keysList('jump'))}${upJumps ? ' or ' + b(keyLabel('up')) : ''} jump · ` +
     `${b(keysList('attack'))} attack (hold to keep swinging) · ${b(keysList('dash'))} dash · ${b(keysList('skill'))} weapon skill when the meter is full · ${b(keyLabel('down'))} + attack in air: slam · ` +
-    `${b(keyLabel('down'))} + jump: drop · ${b('ESC')} pause and rebind · controller works too`;
+    `${b(keyLabel('down'))} + jump: drop · ${b('TAB')} the Codex · ${b('ESC')} pause and rebind · controller works too`;
 }
 
 const held = new Set(), tapped = new Set(), swallow = new Set(), IN = {}, PR = {}, prevIN = {};
@@ -122,6 +122,7 @@ const CTRL = (() => {
   const api = { menu: null };
   // while a menu is up the arena sees no presses, and no held swing or dash leaks through
   const clearPR = () => { for (const k in PR) PR[k] = false; PR.pick = -1; IN.attack = IN.dash = false; };
+  api.clear = () => { clearPR(); return false; };
   api.resume = () => { api.menu = null; rebind = null; };
   api.open = (st, why) => { api.menu = { page: 'pause', sel: 0, why, t: 0 }; };
   // returns true while the game should run this frame
@@ -1795,7 +1796,7 @@ const STORY = (() => {
     seen[id] = 1; save(); skipAll = false; tap = false;
     st.cut = { id, i: 0, t: 0, T: 0 }; return true;
   }
-  const AFTER = { end3: st => { st.victory = true; openOver(st); } };
+  const AFTER = { end3: st => { CODEX.learn('dawn'); st.victory = true; openOver(st); } };
   function finish(st) { const id = st.cut.id; st.cut = null; skipAll = false; tap = false; if (AFTER[id]) AFTER[id](st); }
   function tick(ctx, st, rdt, W, H) {
     if (st.cutPend > 0 && !st.ov && !st.cut) { if ((st.cutPend -= rdt) <= 0) { st.cutPend = 0; if (!play(st, st.cutNext) && AFTER[st.cutNext]) AFTER[st.cutNext](st); } }
@@ -1996,6 +1997,12 @@ const AI = (() => {
     if (e.hit > 0 && e.type !== 'br') { if (e.mode && e.mode !== 'vault') e.mode = null; e.tele = 0; return false; }   // a hit staggers them
     if (e.mode) return act(st, e, p, dx, dy, dt, sm, hit, l);
     if (e.type === 'sp') return hexer(st, e, p, dx, dy, dt, sm, l);
+    // snuffers at the Throne feint: if you turn to face the blink, they blink again to your back
+    if (e.type === 'sn' && e.act > .2 && !e.feint && st.depth >= 13 && Math.sign(e.x - p.x) === p.f && Math.random() < dt * 6) {
+      const tx = p.x - p.f * 70; e.feint = 1;
+      if (floorAt(tx, p.y) && !wallAt(tx, p.y - 20)) { sparks(st.P, e.x, e.y - 28, 1, 10, C.violet); e.x = tx; e.y = p.y; e.vy = 0; e.f = -p.f; e.act = .45; sparks(st.P, e.x, e.y - 28, 1, 10, C.violet); }
+    }
+    if (e.type === 'sn' && !(e.act > 0)) e.feint = 0;
     if (!e.ground || e.act > 0) return false;                                // in the air, or the dungeon brain is mid-move
 
     // sidestep the player's swing: read it in the first moments of the attack
@@ -2123,7 +2130,11 @@ const AI = (() => {
       e.px = e.x; e.py = e.y;
       return true;
     }
-    if (e.diveCd <= 0 && Math.hypot(e.x - p.x, e.y - p.y + 40) < 230 && busy(st) < tokens(st) + 1 && !wallAt((e.x + p.x) / 2, (e.y + p.y - 40) / 2)) { e.tele = e.teleMax = .32; return true; }
+    if (e.diveCd <= 0 && Math.hypot(e.x - p.x, e.y - p.y + 40) < 230 && busy(st) < tokens(st) + 1 && !wallAt((e.x + p.x) / 2, (e.y + p.y - 40) / 2)) {
+      e.tele = e.teleMax = .32;
+      // the rest of the flock joins in, a beat apart
+      let n = 0; for (const o of st.E) if (o !== e && o.type === 'bat' && !o.dead && !(o.tele > 0) && !(o.dive > 0) && n < 2 && Math.hypot(o.x - e.x, o.y - e.y) < 240 && st.depth >= 4) { o.tele = o.teleMax = .32 + .14 * ++n; o.diveCd = 0; }
+      return true; }
     return false;
   }
   // hover target offset: behind the player, each bat on its own slot
@@ -2135,7 +2146,7 @@ const AI = (() => {
   function bossPick(st, e, p, dx, dy, rage) {
     const i = e.look || 0, adx = Math.abs(dx), o = [];
     if (adx < 90 && dy < -70) return 'upper';                                 // no standing on its head
-    if (i === 0) { o.push(['smash', 1.4]); if (adx < 240) o.push(['sweep', 2.2]); if (rage) o.push(['leap', .8]); }
+    if (i === 0) { o.push(['smash', 1.4]); if (adx < 240) o.push(['sweep', 2.2]); if (rage) o.push(['leap', .8]); if (adx > 220 && adx < 440 && Math.abs(dy) < 50) o.push(['pull', 2.4]); }
     if (i === 1) { o.push(['leap', 2.6], ['smash', 1]); if (rage) o.push(['rain', 1.4]); }
     if (i === 2) { o.push(['smash', 1.2]); if (adx > 170) o.push(['dash', 2.8]); if (rage) o.push(['leap', 1.2]); if (adx < 200) o.push(['sweep', 1]); }
     if (i === 3) { o.push(['leap', 1.8], ['rain', 1.5], ['smash', .7]); if (Math.abs(dy) < 40) o.push(['blink', 2.4]); }
@@ -2144,7 +2155,7 @@ const AI = (() => {
     for (const q of o) if ((r -= q[1]) <= 0) return q[0];
     return 'smash';
   }
-  const WIND = { smash: .75, sweep: .55, leap: .45, dash: .6, slash: .4, rain: .6, upper: .32, blink: .2 };
+  const WIND = { pull: .55, smash: .75, sweep: .55, leap: .45, dash: .6, slash: .4, rain: .6, upper: .32, blink: .2 };
   function bwind(e, kind, rage) { e.ai = 'wind'; e.next = kind; e.at = e.windT = WIND[kind] * (rage ? .72 : 1); }
 
   function boss(st, e, p, dt, sm, hit) {
@@ -2152,14 +2163,13 @@ const AI = (() => {
     const bd = 1 + (st.depth >= 8 ? 1 : 0);
     e.at -= dt;
     if (e.ground && !e.landed) { e.landed = 1; st.shake = .45; st.rings.push({ x: e.x, y: e.y, t: 0, kind: 'slam', big: 1 }); }
+    // at half health it roars and calls its dungeon's dead to fight beside it
+    if (rage && !e.called && e.ground && (e.ai === 'walk' || e.ai === 'smash')) { e.called = 1; callAdds(st, e); }
     if (e.ai === 'walk') {
       e.f = Math.sign(dx) || 1;
       const want = adx < 70 ? 0 : e.f * BOSS[i].walk * sm * (rage ? 1.25 : 1);
       e.vx = lerp(e.vx, want, Math.min(1, dt * 3));
-      if (e.at <= 0 && e.ground) { const k = bossPick(st, e, p, dx, dy, rage); e.last = k; bwind(e, k, rage);
-        if (k === 'leap') { const T = 2 * 900 / GRV; e.tx = clamp(p.x + p.vx * T * (.5 + .4 * l), 60, DA.w - 60); e.ty = e.y; }
-        if (k === 'rain') { const n = rage ? 7 : 5, c = p.x + clamp(p.vx * .5, -160, 160); e.ry = p.y; e.rx = []; for (let k2 = 0; k2 < n; k2++) e.rx.push(clamp(c + (k2 - (n - 1) / 2) * 68, 40, DA.w - 40)); }
-      }
+      if (e.at <= 0 && e.ground) startMove(st, e, p, bossPick(st, e, p, dx, dy, rage), rage, l);
     } else if (e.ai === 'wind') {
       e.vx *= Math.max(0, 1 - dt * 10);
       if (e.next === 'sweep' || e.next === 'upper' || e.next === 'smash') { if (e.at > e.windT * .5) e.f = Math.sign(dx) || e.f; }
@@ -2173,14 +2183,39 @@ const AI = (() => {
         if (Math.abs(p.x - e.x) < 120 && Math.abs(p.y - e.y) < 70) hit(bd);
         if (i === 3 || (i === 1 && rage)) { const n = rage ? 5 : 3; for (let k = 0; k < n; k++) lob(st, e.x, e.y - 120, p.x + (k - (n - 1) / 2) * 90 + clamp(p.vx * .5, -120, 120), p.y - 28, .9); }
       }
+    } else if (e.ai === 'pull') {
+      // the chain runs out along the floor; whoever it catches is dragged in for a smash
+      e.cx += e.f * 1100 * dt; e.vx = 0;
+      if (Math.random() < .9) sparks(st.P, e.cx, e.y - 30, .5, 1, '#c9c2b8');
+      if (!e.caught && p.dash <= 0 && p.hurt <= 0 && Math.abs(p.x - e.cx) < 30 && p.y - 56 < e.y - 10 && p.y > e.y - 80) {
+        e.caught = 1; p.vx = Math.sign(e.x - p.x) * 760; p.vy = -260; p.ground = false; p.kick = .3; p.atk = null; st.shake = .25;
+      }
+      if (e.caught || Math.abs(e.cx - e.x) > 460 || wallAt(e.cx, e.y - 30)) { if (e.caught) { bwind(e, 'smash', true); e.at = e.windT = .32; } else { e.ai = 'smash'; e.at = .45; } }
     } else if (e.ai === 'dash') {
       e.vx = e.f * 940; if (Math.random() < .8) sparks(st.P, e.x - e.f * 20, e.y - 40, .8, 2);
       if (body(p, e.x - 30, e.x + 30, e.y - 120, e.y)) hit(bd);
       if (e.at <= 0 || e.wall === e.f || e.x < 70 || e.x > DA.w - 70) { e.vx = e.f * 120; e.ai = 'smash'; e.at = .7; st.shake = .2; }
     } else if (e.ai === 'smash' && e.at <= 0) {
       if (e.chain > 0) { e.chain--; e.chained = true; bwind(e, 'smash', true); e.at = e.windT = .38; }
-      else { e.ai = 'walk'; e.at = (rage ? rnd(.7, 1.2) : rnd(1.1, 1.8)) - .3 * l; }
+      // below a quarter health it stops walking between moves and strings them together
+      else if (e.hp < e.mhp / 4 && e.ground && !e.combo && Math.random() < .65) { e.combo = 1; startMove(st, e, p, bossPick(st, e, p, dx, dy, true), true, l); }
+      else { e.combo = 0; e.ai = 'walk'; e.at = (rage ? rnd(.7, 1.2) : rnd(1.1, 1.8)) - .3 * l; }
     }
+  }
+
+  function startMove(st, e, p, k, rage, l) {
+    e.last = k; bwind(e, k, rage);
+    if (k === 'leap') { const T = 2 * 900 / GRV; e.tx = clamp(p.x + p.vx * T * (.5 + .4 * l), 60, DA.w - 60); e.ty = e.y; }
+    if (k === 'rain') { const n = rage ? 7 : 5, c = p.x + clamp(p.vx * .5, -160, 160); e.ry = p.y; e.rx = []; for (let k2 = 0; k2 < n; k2++) e.rx.push(clamp(c + (k2 - (n - 1) / 2) * 68, 40, DA.w - 40)); }
+  }
+  const ADD = [['sh', 3, 52], ['dr', 4, 50], ['fg', 4, 56], ['sn', 3, 56]];
+  function callAdds(st, e) {
+    const [type, hp0, h] = ADD[e.look || 0], hp = hp0 * hpMul(st.depth);
+    st.shake = .5; st.rings.push({ x: e.x, y: e.y - 60, t: 0, kind: 'slam', big: 1, red: 1 });
+    st.banner = { text: 'IT CALLS ITS DEAD', sub: 'THE BOSS IS ENRAGED', t: 1.6, col: C.crimson };
+    for (const sd of [-1, 1]) { const x = clamp(e.x + sd * 170, 60, DA.w - 60); if (!floorAt(x, e.y) || wallAt(x, e.y - 30)) continue;
+      sparks(st.P, x, e.y - 30, 1.2, 14, C.crimson);
+      st.E.push({ type, elite: null, x, y: e.y, vx: 0, vy: 0, hp, mhp: hp, o: rnd(0, 20), f: -sd, hit: 0, ground: true, sc: 1, w: 18, h, shoot: rnd(1, 2), plat: null, burnT: 0, aiCd: .8 }); }
   }
 
   function bossDo(st, e, p, dx, dy, rage, bd, hit) {
@@ -2216,7 +2251,8 @@ const AI = (() => {
     } else if (k === 'rain') {
       e.ai = 'smash'; e.at = .8;
       for (const x of e.rx || []) { let y = p.y - 380; while (y < p.y - 80 && wallAt(x, y)) y += TS; st.proj.push({ x, y: Math.max(30, y), vx: 0, vy: 40, life: 3 }); }
-    } else { e.ai = 'walk'; e.at = 1; }
+    } else if (k === 'pull') { e.ai = 'pull'; e.cx = e.x + e.f * 30; e.caught = 0; e.f = Math.sign(dx) || e.f; }
+    else { e.ai = 'walk'; e.at = 1; }
   }
 
   // ---- danger markers for every wind-up ----
@@ -2236,6 +2272,7 @@ const AI = (() => {
         const kk = clamp(1 - e.at / (e.windT || .75), 0, 1), a = .18 + .34 * kk, red = `rgba(229,56,59,${a})`;
         ctx.fillStyle = red; ctx.strokeStyle = `rgba(255,90,80,${a + .2})`; ctx.lineWidth = 2;
         if (e.next === 'sweep') for (const sd of (e.hp < e.mhp / 2 ? [-1, 1] : [e.f])) ctx.fillRect(Math.min(e.x, e.x + sd * 250), e.y - 54, 250, 54);
+        if (e.next === 'pull') ctx.fillRect(Math.min(e.x, e.x + e.f * 460), e.y - 80, 460, 70 * kk);
         if (e.next === 'slash') ctx.fillRect(Math.min(e.x, e.x + e.f * 160), e.y - 130, 160, 130);
         if (e.next === 'upper') ctx.fillRect(e.x - 80, e.y - 300, 160, 300);
         if (e.next === 'dash') ctx.fillRect(Math.min(e.x, e.x + e.f * 520), e.y - 110, 520, 110 * kk);
@@ -2243,6 +2280,7 @@ const AI = (() => {
         if (e.next === 'leap' && e.tx != null) { ctx.beginPath(); ctx.ellipse(e.tx, e.y - 2, 120 * (.4 + .6 * kk), 12, 0, 0, TAU); ctx.fill(); ctx.stroke(); }
         if (e.next === 'rain' && e.rx) for (const x of e.rx) { ctx.beginPath(); ctx.ellipse(x, (e.ry ?? st.p.y) - 2, 18, 5, 0, 0, TAU); ctx.fill(); }
       }
+      if (e.type === 'boss' && e.ai === 'pull') { ctx.strokeStyle = 'rgba(201,194,184,.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(e.x + e.f * 20, e.y - 70); ctx.lineTo(e.cx, e.y - 30); ctx.stroke(); ctx.fillStyle = '#c9c2b8'; circ(ctx, e.cx, e.y - 30, 7); }
       if (e.type === 'boss' && e.ai === 'leap' && e.tx != null) { ctx.fillStyle = 'rgba(229,56,59,.3)'; ctx.beginPath(); ctx.ellipse(e.tx, (e.ty ?? FLOOR) - 2, 120, 12, 0, 0, TAU); ctx.fill(); }
     }
     ctx.restore();
@@ -2800,7 +2838,7 @@ const AUDIO = (() => {
 })();
 window.AUDIO = AUDIO;
 
-mount('cv-demo', DW, DH, (ctx, t, dt, r) => { window.WB = r.st; window.WBC = CTRL; pollInput(); const go = CTRL.step(r.st, dt); arenaSim(ctx, go ? dt : 0, r); CTRL.draw(ctx, r.W, r.H); }, (W, H) => {
+mount('cv-demo', DW, DH, (ctx, t, dt, r) => { window.WB = r.st; window.WBC = CTRL; pollInput(); const cOpen = CODEX.step(); const go = cOpen ? CTRL.clear() : CTRL.step(r.st, dt); arenaSim(ctx, go ? dt : 0, r); CTRL.draw(ctx, r.W, r.H); CODEX.draw(ctx, r.W, r.H, go ? dt : 0); }, (W, H) => {
   const st = {
     bg: stageBg(W, H, { lx: W * .5, ly: H * .45, spread: .8, spires: false, glow: [170, 52, 46], vig: .7, int: .45 }),
     vig: vignette(W, H, .7), p: { ph: 0 }, cam: { y: FLOOR - 200, x: DA.w / 2 }, P: [], rings: [], tr: [], gh: {}, pfx: {},
@@ -2846,7 +2884,7 @@ function openOver(st) {
 }
 function applyPick(st) {
   const o = st.ov, v = o.opts[o.pick];
-  if (o.kind === 'weapon') { st.weapon = v; st.banner = { text: 'DESCEND', sub: `${v.toUpperCase()} · DEPTH I · FIFTEEN CANDLES · ONE THRONE BELOW`, t: 1.7 }; }
+  if (o.kind === 'weapon') { CODEX.learn('norrow'); CODEX.learn('hild'); CODEX.learn('place_0'); st.weapon = v; st.banner = { text: 'DESCEND', sub: `${v.toUpperCase()} · DEPTH I · FIFTEEN CANDLES · ONE THRONE BELOW`, t: 1.7 }; }
   else if (o.kind === 'draft') {
     st.runes.push(v);
     if (v === 'GLASS EDGE') { st.maxHp = 3; st.hp = Math.min(st.hp, 3); }
@@ -2897,7 +2935,7 @@ function aSpawn(st) {
 function spawnBoss(st) {
   const hp = 20 * hpMul(st.depth) * (st.run === 47 ? .7 : 1), x = clamp(st.p.x + (st.p.x < DA.w / 2 ? 420 : -420), 360, DA.w - 360);
   st.boss = { type: 'boss', king: st.bosses % 2 === 1, x, y: FLOOR - 200, vx: 0, vy: 0, hp, mhp: hp, o: 0, f: -1, hit: 0, ground: false, w: 44, h: 120, ai: 'walk', at: 1.6, plat: null, burnT: 0, landed: 0 };
-  STORY.onBossSpawn(st);
+  STORY.onBossSpawn(st); CODEX.learn('strepitus');
   st.E.push(st.boss);
 }
 
@@ -2907,6 +2945,68 @@ function brLit(st, bx, by) { return (brState(st)[brKey(bx, by)] || 0) > st.time;
 function brBuff(st) { const T = brState(st); for (const k in T) if (T[k] > st.time) return true; return false; }
 const SKILL_NAMES = { katana: 'IAIDO', greatsword: 'EARTHSPLITTER', spear: 'SKYWARD', daggers: 'FLURRY', sickle: 'REAP' };
 const SKILL_DESC = { katana: 'FLASH THROUGH EVERYTHING AHEAD', greatsword: 'SPLIT THE FLOOR BOTH WAYS', spear: 'LAUNCH UP THROUGH EVERYTHING ABOVE', daggers: 'EIGHT CUTS ON EVERYTHING CLOSE', sickle: 'DRAG EVERY ENEMY NEARBY TO YOU' };
+const CODEX = (() => {
+  const E = [{"id": "norrow", "cat": "LORE", "name": "THE NORROW", "text": "A country of fjords and long winters, where the sun once forgot to rise for forty days. Ever since, the Abbey has kept a vigil of candles through the darkest month, and the Norrow has never forgotten what the dark is like."}, {"id": "hild", "cat": "LORE", "name": "ABBESS HILD", "text": "Keeper of the Abbey and maker of wicks. She braids them from the burnt-out ends of three hundred winters of candles. Each one walks where light cannot, and each one she sends down, she waits for."}, {"id": "hush", "cat": "LORE", "name": "THE HUSH", "text": "The dark below the Abbey is not empty. It listens. Every candle that goes out lets it listen a little closer. When the fifteenth falls, the Hush begins to speak."}, {"id": "strepitus", "cat": "LORE", "name": "THE STREPITUS", "text": "The great noise at the end of the vigil. The brothers strike the pews until the stones shake, and the hidden flame comes home. Down here the noise has another meaning: something old has noticed you."}, {"id": "umber", "cat": "LORE", "name": "THE FIRST WICK", "text": "Before the Saint, there was a wick named Umber. For three hundred winters he carried the hidden flame into the dark and back. No one ever met him at the door. One winter he stopped coming back."}, {"id": "dawn", "cat": "LORE", "name": "THE DAWN", "text": "The flame came home, and someone was waiting at the door. The sun rose over the Norrow on the forty-first day. Far below, the Hush turned over in its sleep. It will wake again."}, {"id": "place_0", "cat": "PLACE", "name": "THE PIT OF PSALMS", "text": "The Abbey's oldest crypt, where the brothers who sang too loud were buried with their mouths sewn shut. The chains on the walls were meant for the dead. Some of them still pull."}, {"id": "place_1", "cat": "PLACE", "name": "THE DROWNED WELL", "text": "A cistern that swallowed a fleet. Rurik's longships still drift in the black water, their oars rising and falling for a crew that never stopped rowing."}, {"id": "place_2", "cat": "PLACE", "name": "THE BLADEWORKS", "text": "The forge where the Norrow's swords were made, until the forge started making smiths instead. The anvils still ring when no one strikes them."}, {"id": "place_3", "cat": "PLACE", "name": "THE HOLLOW THRONE", "text": "The bottom of the world, where the last candle burns. Umber built a throne from everything the dark ever took. He sits in it and waits for someone to come and take it back."}, {"id": "foe_0", "cat": "FOE", "name": "HOLLOW", "text": "Pilgrims who came down to pray and stayed too long. The dark wore away everything but the shape of a person, and the habit of walking toward light."}, {"id": "foe_1", "cat": "FOE", "name": "GLOOMWING", "text": "Bats of soot and silence that roost in the vaults. They do not see you. They hear the small crackle of your flame and dive for it."}, {"id": "foe_2", "cat": "FOE", "name": "BRUTE", "text": "Bell-ringers, once. They hauled the great bells for a lifetime, and their arms remember. Stand clear when one raises its fists."}, {"id": "foe_3", "cat": "FOE", "name": "HEXER", "text": "Brothers who learned the dark's own prayers. They throw them back at the light in slow, burning words. Close the distance and they forget their verses."}, {"id": "foe_4", "cat": "FOE", "name": "DROWNED", "text": "Rurik's oarsmen, still in their mail. They crouch in the shallows and leap at anything warm, as if it were the shore they never reached."}, {"id": "foe_5", "cat": "FOE", "name": "FORGED", "text": "Smiths the Bladeworks remade in iron. They hurl the blades they were made to finish, and every one comes back hot."}, {"id": "foe_6", "cat": "FOE", "name": "SNUFFER", "text": "Umber's own servants, made to put out candles. They step through shadow and close in on the flame. Every vigil has a snuffer. This one has many."}, {"id": "elite", "cat": "FOE", "name": "THE MARKED", "text": "Some of the dark's creatures burn with a stolen spark: swift, shielded or ready to burst. They carry three times the ash, and they know it."}, {"id": "boss_0", "cat": "BOSS", "name": "THE CHAIN WARDEN", "text": "Jailer of the Pit for a hundred winters. Umber promised him the chains would come off if he guarded the way down. They came off when you broke them."}, {"id": "boss_1", "cat": "BOSS", "name": "THE HOLLOW KING", "text": "Rurik Sea-Wolf came to plunder the dark and stayed to rule it. The crown Umber gave him was heavier than the sea. He knew what the Saint was, and told you with his last breath."}, {"id": "boss_2", "cat": "BOSS", "name": "THE ASHEN JARL", "text": "Jarl Sigvald fed himself to the forge so he would never die in his bed. He got his endless war. He wanted only one good death to end it, and you gave him one worth a song."}, {"id": "boss_3", "cat": "BOSS", "name": "SAINT UMBER", "text": "The first wick, the Candle-Eater, the Saint of the Hollow Throne. He was not cruel. He was only tired of coming home to an empty door."}];
+  const COL = { LORE: '#f2b43a', PLACE: '#3fd6c4', FOE: '#e5383b', BOSS: '#b44dff' };
+  let got = {}, open = false, pick = 0, toasts = [], prev = {};
+  try { got = JSON.parse(localStorage.getItem('wickbearer.codex') || '{}') || {}; } catch (e) { got = {}; }
+  const keyQ = [];
+  addEventListener('keydown', e => {
+    if (e.code === 'Tab') { e.preventDefault(); open = !open; }
+    else if (open && ['ArrowUp', 'KeyW', 'ArrowDown', 'KeyS', 'Escape', 'ShiftLeft', 'ShiftRight'].includes(e.code)) { e.preventDefault(); e.stopImmediatePropagation(); keyQ.push(e.code); }
+  }, true);
+  function learn(id) {
+    if (got[id]) return; const e = E.find(x => x.id === id); if (!e) return;
+    got[id] = 1; try { localStorage.setItem('wickbearer.codex', JSON.stringify(got)); } catch (er) {}
+    toasts.push({ name: e.name, t: 0 });
+  }
+  const count = () => E.filter(e => got[e.id]).length;
+  // returns true while the Codex is open, so the game pauses under it
+  function step() {
+    const pad = (navigator.getGamepads ? [...navigator.getGamepads()] : []).find(g => g);
+    const b = i => !!(pad && pad.buttons[i] && pad.buttons[i].pressed), now = { back: b(8), up: b(12), down: b(13), close: b(1) };
+    const pr = k => now[k] && !prev[k]; const ev = { up: pr('up'), down: pr('down'), close: pr('close') };
+    if (pr('back')) open = !open;
+    prev = now;
+    for (const c of keyQ.splice(0)) { if (c === 'ArrowUp' || c === 'KeyW') ev.up = true; else if (c === 'ArrowDown' || c === 'KeyS') ev.down = true; else ev.close = true; }
+    if (open) {
+      if (ev.up) pick = (pick + E.length - 1) % E.length;
+      if (ev.down) pick = (pick + 1) % E.length;
+      if (ev.close) open = false;
+    }
+    return open;
+  }
+  function wrap(ctx, s, mw) { const out = []; let line = ''; for (const w of s.split(' ')) { const t = line ? line + ' ' + w : w; if (ctx.measureText(t).width > mw && line) { out.push(line); line = w; } else line = t; } out.push(line); return out; }
+  function draw(ctx, W, H, dt) {
+    const T = (s, x, y, f, c, al = 'left') => { ctx.font = f; ctx.textAlign = al; ctx.lineWidth = 3; ctx.strokeStyle = '#000'; ctx.strokeText(s, x, y); ctx.fillStyle = c; ctx.fillText(s, x, y); };
+    toasts = toasts.filter(t => (t.t += dt) < 3.6);
+    toasts.forEach((t, i) => {
+      const a = Math.max(0, Math.min(1, t.t * 4, (3.6 - t.t) * 2)), x = W - 276, y = H - 150 - i * 52;
+      ctx.save(); ctx.globalAlpha = a; ctx.fillStyle = 'rgba(8,6,10,.92)'; ctx.fillRect(x, y, 260, 44); ctx.strokeStyle = '#f2b43a'; ctx.lineWidth = 1.2; ctx.strokeRect(x, y, 260, 44);
+      T('NEW IN THE CODEX · TAB', x + 12, y + 17, `600 10px ${MONO}`, '#f2b43a'); T(t.name, x + 12, y + 36, `700 15px ${MONO}`, '#f3ebe0'); ctx.restore();
+    });
+    if (!open) return;
+    ctx.save(); ctx.fillStyle = 'rgba(4,3,5,.95)'; ctx.fillRect(0, 0, W, H);
+    T('THE CODEX', W / 2, 54, `900 34px ${DISP}`, '#f3ebe0', 'center');
+    T(`${count()} OF ${E.length} PAGES · EVERYTHING THE DARK HAS SHOWN YOU`, W / 2, 76, `600 11px ${MONO}`, '#3fd6c4', 'center');
+    const rows = 15, top = Math.max(0, Math.min(pick - 7, E.length - rows)), x0 = 40;
+    for (let j = 0; j < Math.min(rows, E.length); j++) {
+      const i = top + j, e = E[i], y = 98 + j * 28, known = got[e.id];
+      if (i === pick) { ctx.fillStyle = 'rgba(30,22,34,1)'; ctx.fillRect(x0, y, 280, 24); ctx.strokeStyle = '#f2b43a'; ctx.lineWidth = 1.5; ctx.strokeRect(x0, y, 280, 24); }
+      T(e.cat, x0 + 8, y + 16, `600 9px ${MONO}`, COL[e.cat]);
+      T(known ? e.name : '? ? ?', x0 + 60, y + 17, `600 13px ${MONO}`, known ? '#f3ebe0' : '#5d5752');
+    }
+    const s = E[pick], bx = 350, bw = W - bx - 40;
+    ctx.fillStyle = 'rgba(14,11,16,1)'; ctx.fillRect(bx, 98, bw, 412);
+    if (got[s.id]) {
+      T(s.name, bx + 22, 136, `900 22px ${DISP}`, COL[s.cat]);
+      ctx.font = `500 15px ${MONO}`; wrap(ctx, s.text, bw - 44).forEach((l, i) => T(l, bx + 22, 172 + i * 23, `500 15px ${MONO}`, '#d8d0c6'));
+    } else { T('This page is still dark.', bx + 22, 136, `600 17px ${MONO}`, '#7d766f'); T('Keep descending.', bx + 22, 162, `500 13px ${MONO}`, '#5d5752'); }
+    T('↑ ↓  CHOOSE      TAB / ESC / SHIFT  BACK', W / 2, H - 22, `600 11px ${MONO}`, '#7d766f', 'center');
+    ctx.restore();
+  }
+  return { learn, step, draw, count, E };
+})();
 function arenaSim(ctx, rdt, r) {
   const st = r.st, W = r.W, H = r.H, p = st.p;
   AUDIO.watch(st, rdt);
@@ -2950,6 +3050,9 @@ function arenaSim(ctx, rdt, r) {
   };
   const kill = e => {
     e.dead = true; st.kills++;
+    CODEX.learn(e.type === 'boss' ? 'boss_' + Math.min(3, Math.floor((st.depth - 1) / 4)) : 'foe_' + { sh: 0, bat: 1, br: 2, sp: 3, dr: 4, fg: 5, sn: 6 }[e.type]);
+    if (e.elite) CODEX.learn('elite');
+    if (e.type === 'boss' && st.depth >= 5 && st.depth < 9) CODEX.learn('umber');
     const boss = e.type === 'boss';
     shadeBurst(st.P, e.x, e.y - e.h * .5, boss ? 2.2 : .8, boss ? 70 : 18);
     const n = boss ? 26 : e.elite ? 5 : e.type === 'br' ? 4 : 2;
@@ -2991,7 +3094,7 @@ function arenaSim(ctx, rdt, r) {
     if (!st.dying) {
       if (st.bossIntro > 0) { if ((st.bossIntro -= dt) <= 0) spawnBoss(st); }
       else if (!st.boss && (st.dp += dt) >= DEPTH_T) {
-        st.dp = 0; st.depth++; STORY.onDepth(st);
+        st.dp = 0; st.depth++; STORY.onDepth(st); CODEX.learn('hush'); CODEX.learn('place_' + Math.min(3, Math.floor((st.depth - 1) / 4)));
         if (st.depth === st.nextBoss) { st.bossIntro = 2.2; st.bossName = STORY.bossIntro(st); st.shake = .7; st.banner = { text: `DEPTH ${roman(st.depth)} · STREPITUS`, sub: `${st.bossName} RISES FROM BELOW`, t: 2.2, col: C.crimson }; }
         else st.banner = { text: `DEPTH ${roman(st.depth)} · A CANDLE GOES OUT`, sub: DEPTH_MSG[st.depth] || `ENEMIES +${Math.round((hpMul(st.depth) - 1) * 100)}% HP · FASTER SPAWNS`, t: 1.5 };
       }

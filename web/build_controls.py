@@ -23,8 +23,9 @@ def _controls_build():
 
     # --- the loop polls input once, then the pause menu decides whether the arena runs
     rep("function arenaSim(ctx, rdt, r) {\n  pollInput();\n", "function arenaSim(ctx, rdt, r) {\n")
-    rep("mount('cv-demo', DW, DH, (ctx, t, dt, r) => arenaSim(ctx, dt, r),",
-        "mount('cv-demo', DW, DH, (ctx, t, dt, r) => { window.WB = r.st; window.WBC = CTRL; pollInput(); const go = CTRL.step(r.st, dt); arenaSim(ctx, go ? dt : 0, r); CTRL.draw(ctx, r.W, r.H); },")
+    # (the Codex pass already wrapped this line; the Codex sits on top of the pause menu)
+    rep("mount('cv-demo', DW, DH, (ctx, t, dt, r) => { const cOpen = CODEX.step(); arenaSim(ctx, cOpen ? 0 : dt, r); CODEX.draw(ctx, r.W, r.H, cOpen ? 0 : dt); },",
+        "mount('cv-demo', DW, DH, (ctx, t, dt, r) => { window.WB = r.st; window.WBC = CTRL; pollInput(); const cOpen = CODEX.step(); const go = cOpen ? CTRL.clear() : CTRL.step(r.st, dt); arenaSim(ctx, go ? dt : 0, r); CTRL.draw(ctx, r.W, r.H); CODEX.draw(ctx, r.W, r.H, go ? dt : 0); },")
     # reduced-motion visitors still need a running game here (the pitch page freezes its plates instead)
     rep("if (reduce) {\n  R.forEach(r => { r.t = .55; draw(r, 0); });", "if (false) {\n  R.forEach(r => { r.t = .55; draw(r, 0); });")
 
