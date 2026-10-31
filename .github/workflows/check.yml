@@ -1,0 +1,21 @@
+name: check
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  godot:
+    runs-on: ubuntu-latest
+    container: barichello/godot-ci:4.3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Import project
+        run: godot --headless --import 2>&1 | tee import.log
+      - name: Run the main scene for 600 frames
+        run: timeout 120 godot --headless --quit-after 600 2>&1 | tee run.log
+      - name: Fail on script errors
+        run: |
+          if grep -nE "SCRIPT ERROR|Parse Error|Failed to load script|Invalid call|Invalid access|Invalid assignment" import.log run.log; then
+            echo "Godot reported script errors"; exit 1
+          fi
+          echo "No script errors"
