@@ -11,12 +11,12 @@
   .keys b { color: var(--text); font-weight: 600; }
 </style>
 <canvas id="cv-demo" tabindex="0" aria-label="Wickbearer playtest"></canvas>
-<div class="keys"><b>M</b> sound on/off · <b>ESC</b> skip cutscene · <b>J</b> next shot · <b>A D</b> move · <b>SPACE</b> jump, double jump, wall jump · <b>J</b> attack (tap for combo) · <b>S + J</b> in air: slam · <b>SHIFT</b> dash · <b>S + SPACE</b> drop · controller works too</div>
+<div class="keys"><b>M</b> sound on/off · <b>ESC</b> skip cutscene · <b>J</b> next shot · <b>A D</b> move · <b>SPACE</b> jump, double jump, wall jump · <b>J</b> attack (tap for combo) · <b>S + J</b> in air: slam · <b>SHIFT</b> dash · <b>Q</b> weapon skill when the meter is full · <b>S + SPACE</b> drop · controller works too</div>
 <script>
 (() => {
 /* ---------- input: keyboard + gamepad ---------- */
 const KEYS = { left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'], up: ['KeyW', 'ArrowUp'], down: ['KeyS', 'ArrowDown'],
-  jump: ['Space', 'KeyZ', 'KeyK'], attack: ['KeyJ', 'KeyX'], dash: ['ShiftLeft', 'ShiftRight', 'KeyL', 'KeyC'] };
+  jump: ['Space', 'KeyZ', 'KeyK'], attack: ['KeyJ', 'KeyX'], dash: ['ShiftLeft', 'ShiftRight', 'KeyL', 'KeyC'], skill: ['KeyQ'] };
 const held = new Set(), IN = {}, PR = {}, prevIN = {};
 addEventListener('keydown', e => { if (Object.values(KEYS).flat().includes(e.code)) e.preventDefault(); held.add(e.code); });
 addEventListener('keyup', e => held.delete(e.code));
@@ -26,7 +26,7 @@ function pollInput() {
   const b = i => !!(pad && pad.buttons[i] && pad.buttons[i].pressed), ax = i => pad ? pad.axes[i] || 0 : 0;
   const now = {
     left: b(14) || ax(0) < -.4, right: b(15) || ax(0) > .4, up: b(12) || ax(1) < -.5, down: b(13) || ax(1) > .5,
-    jump: b(0), attack: b(2), dash: b(5) || b(7) || b(1) };
+    jump: b(0), attack: b(2), dash: b(5) || b(7) || b(1), skill: b(3) };
   for (const k in KEYS) { IN[k] = now[k] || KEYS[k].some(c => held.has(c)); PR[k] = IN[k] && !prevIN[k]; prevIN[k] = IN[k]; }
 }
 
@@ -2684,7 +2684,7 @@ function newRun(st) {
   Object.assign(st.p, { x: DA.w / 2, y: FLOOR, vx: 0, vy: 0, f: 1, ground: true, dj: false, flip: 0, dash: 0, dashCd: 0, atk: null, slam: false, hurt: 0, land: 0, wall: 0, slideT: 0, kick: 0, dropT: 0, plat: 'solid', pre: 0, stretch: 0, steer: null, forceT: 0 });
   Object.assign(st, { E: [], G: [], N: [], proj: [], cres: [], fire: [], shades: [], quakes: [], rt: 0, dp: 0, depth: 1, nextBoss: 4, boss: null, bossIntro: 0, bossName: '',
     kills: 0, bosses: 0, lvl: 1, xp: 0, runWax: 0, hidden: true, hp: 5, maxHp: 5, temper: 0, runes: [], healK: 0, veilT: 0, spawnT: 1.2, dying: 0, flow: 0, flowT: 0,
-    banner: null, pendDraft: 0, pendShop: 0, arenaNow: 0, targ: null, weapon: 'katana' });
+    banner: null, pendDraft: 0, pendShop: 0, arenaNow: 0, targ: null, weapon: 'katana', skill: 0 });
   const pool = WEAPONS.filter(w => w !== 'sickle' || st.meta.u > 0);
   const a = pool[Math.floor(st.rng() * pool.length)]; let b; do b = pool[Math.floor(st.rng() * pool.length)]; while (b === a);
   st.ov = interactive({ kind: 'weapon', t: 0, at: 1.9, dur: 2.8, opts: [a, b], pick: st.meta.u > 0 && b === 'sickle' ? 1 : a === 'sickle' ? 0 : st.rng() < .5 ? 0 : 1 });
@@ -2775,6 +2775,8 @@ function brKey(bx, by) { return bx + ',' + by; }
 function brState(st) { if (st.brRun !== st.run) { st.brRun = st.run; st.brT = {}; } return st.brT; }
 function brLit(st, bx, by) { return (brState(st)[brKey(bx, by)] || 0) > st.time; }
 function brBuff(st) { const T = brState(st); for (const k in T) if (T[k] > st.time) return true; return false; }
+const SKILL_NAMES = { katana: 'IAIDO', greatsword: 'EARTHSPLITTER', spear: 'SKYWARD', daggers: 'FLURRY', sickle: 'REAP' };
+const SKILL_DESC = { katana: 'FLASH THROUGH EVERYTHING AHEAD', greatsword: 'SPLIT THE FLOOR BOTH WAYS', spear: 'LAUNCH UP THROUGH EVERYTHING ABOVE', daggers: 'EIGHT CUTS ON EVERYTHING CLOSE', sickle: 'DRAG EVERY ENEMY NEARBY TO YOU' };
 function arenaSim(ctx, rdt, r) {
   pollInput();
   const st = r.st, W = r.W, H = r.H, p = st.p;
@@ -2836,6 +2838,8 @@ function arenaSim(ctx, rdt, r) {
     if (e.dead) return;
     dmg = dmg * (glass ? 2 : 1) + st.temper + (crit && has(st, 'WHETSTONE') ? 1 : 0);
     e.hp -= dmg; e.hit = .12;
+    if (!st.skilling) { const was = st.skill >= 1; st.skill = Math.min(1, (st.skill || 0) + (e.type === 'boss' ? .05 : .07));
+      if (!was && st.skill >= 1) st.banner = { text: SKILL_NAMES[st.weapon] + ' READY', sub: 'PRESS Q OR Y', t: 1, col: C.gold }; }
     if (e.type === 'boss') e.vx += kx * .05; else { e.vx = kx; if (ky) { e.vy = ky; e.ground = false; } }
     addFlow(); st.hitstop = Math.max(st.hitstop, .05);
     st.N.push({ x: e.x + rnd(-6, 6), y: e.y - e.h - 12, v: Math.round(dmg * 11 + rnd(0, 6)), life: .7, crit });
@@ -2919,6 +2923,24 @@ function arenaSim(ctx, rdt, r) {
       }
       if (!IN.jump && p.vy < -300 && p.flip <= 0 && p.kick <= 0 && !p.cut) { p.vy *= .5; p.cut = true; }
       if (p.ground || p.vy >= 0) p.cut = false;
+      if (PR.skill && st.skill >= 1) {
+        st.skill = 0; st.skilling = true; st.shake = .3; st.hitstop = .12;
+        const w = st.weapon, py = p.y - 28;
+        st.banner = { text: SKILL_NAMES[w], sub: SKILL_DESC[w], t: 1, col: C.gold };
+        st.rings.push({ x: p.x, y: py, t: 0, kind: 'gale' });
+        for (const e of live) {
+          const dx = e.x - p.x, dy = (e.y - e.h / 2) - py;
+          if (w === 'katana' && dx * p.f > -20 && dx * p.f < 320 && Math.abs(dy) < 70) hurt(e, 3, p.f * 300, -300, true);
+          else if (w === 'greatsword' && Math.abs(dx) < 420 && Math.abs(dy) < 60) hurt(e, 3, Math.sign(dx || 1) * 260, -700, true);
+          else if (w === 'spear' && Math.abs(dx) < 90 && dy < 30 && dy > -420) hurt(e, 3, 0, -900, true);
+          else if (w === 'daggers' && Math.hypot(dx, dy) < 170) for (let i = 0; i < 4; i++) hurt(e, 1, p.f * 60, -120, i === 3);
+          else if (w === 'sickle' && Math.hypot(dx, dy) < 320) { if (e.type !== 'boss') { e.x = p.x + p.f * 34; e.y = p.y; } hurt(e, 3, p.f * 120, -300, true); }
+        }
+        if (w === 'katana') { p.dash = .22; p.dashCd = 0; st.dashId++; p.vx = p.f * 1300; }
+        if (w === 'spear') { p.vy = -1250; p.ground = false; p.flip = .4; }
+        if (w === 'greatsword') { st.rings.push({ x: p.x - 200, y: p.y, t: 0, kind: 'gale' }, { x: p.x + 200, y: p.y, t: 0, kind: 'gale' }); }
+        st.skilling = false;
+      }
       if (p.kick <= 0) { const sp = p.atk ? 80 : 310; p.vx = lerp(p.vx, dir * sp, Math.min(1, dt * (p.ground ? 12 : 6))); if (dir && !p.atk) p.f = dir; }
       p.vy += GRV * (p.vy > 0 ? 1.3 : 1) * dt;
     }
@@ -3216,6 +3238,10 @@ function arenaSim(ctx, rdt, r) {
     ctx.fillStyle = C.crimson; ctx.shadowColor = C.crimson; ctx.shadowBlur = st.hp <= 1 ? 10 + S(st.time * 10) * 6 : 6; ctx.fillRect(bx, by, bw * k, 14); ctx.shadowBlur = 0;
     ctx.restore();
     txt(`${st.hp * 20} / ${st.maxHp * 20} HP`, bx + bw + 10, by + 12, `600 12px ${MONO}`, '#f3ebe0', 'left', 3);
+    { const sk = clamp(st.skill || 0, 0, 1); ctx.save(); ctx.fillStyle = 'rgba(0,0,0,.75)'; ctx.fillRect(bx - 2, by + 20, bw + 4, 8);
+      ctx.fillStyle = sk >= 1 ? C.gold : 'rgba(242,180,58,.6)'; if (sk >= 1) { ctx.shadowColor = C.gold; ctx.shadowBlur = 8 + S(st.time * 8) * 4; }
+      ctx.fillRect(bx, by + 22, bw * sk, 4); ctx.restore();
+      txt(sk >= 1 ? SKILL_NAMES[st.weapon] + '  ·  Q' : SKILL_NAMES[st.weapon], bx + bw + 10, by + 29, `600 10px ${MONO}`, sk >= 1 ? C.gold : '#9a9289', 'left', 3); }
     if (st.maxHp < 5) txt('CURSED', bx + bw + 92, by + 12, `600 10px ${MONO}`, C.crimson, 'left', 3);
   }
   diamond(ctx, 24, 62, 7, C.cyan, null, 8);
