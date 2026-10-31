@@ -195,6 +195,7 @@ func _physics_process(dt: float) -> void:
 	if atk != null:
 		atk.t += dt
 		_attack_hits()
+	if atk != null:
 		if atk.t >= step_time + combo_window or (atk.t >= step_time and not atk.queued and atk.t >= step_time + 0.06):
 			if atk.queued and atk.step < 2:
 				atk = {"step": atk.step + 1, "t": 0.0, "hit": [], "queued": false}
@@ -298,14 +299,20 @@ func _attack_hits() -> void:
 			atk.hit.append(e)
 			hit_count += 1
 			var up := -420.0 if atk.step == 2 else -160.0
+			var step: int = atk.step
 			# weapon quirks: dagger crits every third hit, the sickle hooks enemies in on the finisher
 			if game.weapon == "daggers" and hit_count % 3 == 0:
 				game.hit_enemy(e, damage, Vector2.ZERO)
 				game.fx.ring(e.position + Vector2(0, -28), 40, Color("#f2b43a"))
-			if game.weapon == "sickle" and atk.step == 2:
+				if atk == null:
+					return
+			if game.weapon == "sickle" and step == 2:
 				game.hit_enemy(e, damage * 1.5, Vector2(-facing * 420, -200))
-				continue
-			game.hit_enemy(e, damage * (1.5 if atk.step == 2 else 1.0) * (2.0 if atk.step == 2 and game.has_rune("FINISHER") else 1.0), Vector2(facing * (380 if atk.step == 2 else 220), up))
+			else:
+				game.hit_enemy(e, damage * (1.5 if step == 2 else 1.0) * (2.0 if step == 2 and game.has_rune("FINISHER") else 1.0), Vector2(facing * (380 if step == 2 else 220), up))
+			# a kill can hurt the player (a VOLATILE burst), and getting hit ends the swing
+			if atk == null:
+				return
 
 
 func take_hit(from_x: float) -> void:
