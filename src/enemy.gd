@@ -9,6 +9,14 @@ extends Actor
 ##   drowned    (the Well) crouches, then pounces at you across the floor
 ##   forged     (the Bladeworks) throws spinning blades straight along its floor
 ##   snuffer    (the Throne) blinks next to you and slashes; near it your light shrinks
+##
+## The brain on top (mirrors web/ai.js): ground enemies climb to your platform and
+## drop down to you, sidestep your swings (more often the deeper you go), and a
+## crowded side sends one vaulting over you so you get surrounded. Hollows lunge,
+## brutes charge from range, hexers lead their shots and hop away when you close
+## in, forged aim their blades, and gloomwings circle behind you before diving at
+## where you're going. A few attack tokens stop everyone striking at once, and
+## every wind-up shows a red mark over the enemy, so the danger stays readable.
 
 enum Kind { HOLLOW, GLOOMWING, BRUTE, HEXER, DROWNED, FORGED, SNUFFER }
 
@@ -39,6 +47,20 @@ var act_cd := 1.5
 var dive_dir := Vector2.ZERO
 # "" or SWIFT (60% faster), SHIELDED (half damage from the front), VOLATILE (bursts on death)
 var elite := ""
+# the brain: "" or hop, vault, wind, lunge, charge, recover
+var mode := ""
+var next_move := ""
+var tele := 0.0
+var tele_max := 1.0
+var mt := 0.0
+var air_t := 0.0
+var ai_cd := 1.0
+var dodge_cd := 0.0
+var jump_cd := 0.0
+var drop_t := 0.0
+var side_off := 0.0
+# one vault at a time across the whole pack
+static var vault_at := 0.0
 
 
 func setup(k: Kind, hp_mul: float) -> void:
@@ -52,6 +74,7 @@ func setup(k: Kind, hp_mul: float) -> void:
 	hp = max_hp
 	ph = randf() * TAU
 	act_cd = randf_range(1.0, 2.5)
+	ai_cd = randf_range(0.6, 1.6)
 
 
 ## From depth III some enemies come as elites: more health, a gold ring and one twist.
@@ -75,26 +98,312 @@ func _physics_process(dt: float) -> void:
 	stun = maxf(0, stun - dt)
 	hop_cd = maxf(0, hop_cd - dt)
 	act_cd = maxf(0, act_cd - dt)
-	match kind:
-		Kind.GLOOMWING:
-			_fly(dt)
-			return
-		Kind.BRUTE:
-			_brute(dt)
-		Kind.HEXER:
-			_hexer(dt)
-		Kind.DROWNED:
-			_drowned(dt)
-		Kind.FORGED:
-			_forged(dt)
-		Kind.SNUFFER:
-			_snuffer(dt)
-		_:
-			_walk(dt, speed, true)
+	if kind == Kind.GLOOMWING:
+		_fly(dt)
+		return
+	if not _brain(dt):
+		match kind:
+			Kind.BRUTE:
+				_brute(dt)
+			Kind.HEXER:
+				_hexer(dt)
+			Kind.DROWNED:
+				_drowned(dt)
+			Kind.FORGED:
+				_forged(dt)
+			Kind.SNUFFER:
+				_snuffer(dt)
+			_:
+				_walk(dt, speed, true)
 	vel.y = minf(vel.y + gravity * dt, 1400)
-	game.world.move(self, dt, false)
+	game.world.move(self, dt, drop_t > 0)
 	ph += absf(vel.x) * dt * 0.04
 	_touch()
+
+
+# ---------- the brain ----------
+
+## 0 at depth I, 1 by depth XIII
+func smarts() -> float:
+	return clampf((game.depth - 1) / 12.0, 0, 1)
+
+
+func _rate() -> float:
+	return sqrt(1.6) if elite == "SWIFT" else 1.0
+
+
+static func busy_count(g: Game) -> int:
+	var n := 0
+	for o in g.enemies:
+		if not o.dead and not (o is Boss) and o.mode in ["wind", "lunge", "charge"]:
+			n += 1
+	return n
+
+
+func _tokens() -> int:
+	return 2 + int(game.depth / 5.0)
+
+
+func _side_count(s: int) -> int:
+	var p := game.player
+	var n := 0
+	for o in game.enemies:
+		if not o.dead and not (o is Boss) and o.kind != Kind.GLOOMWING and signf(o.position.x - p.position.x) == s \
+				and absf(o.position.x - p.position.x) < 260 and absf(o.position.y - p.position.y) < 50:
+			n += 1
+	return n
+
+
+func _floor_at(x: float, y: float) -> bool:
+	var wd := game.world
+	return wd.is_solid(wd.cell(x), wd.cell(y + 2)) or wd.is_one(wd.cell(x), wd.cell(y + 2))
+
+
+func _wall_at(x: float, y: float) -> bool:
+	return game.world.is_solid(game.world.cell(x), game.world.cell(y))
+
+
+## no ceiling between the head and a target height
+func _headroom(to_y: float, dir: float) -> bool:
+	var wd := game.world
+	var c := wd.cell(position.x + dir * 16)
+	var r := wd.cell(position.y - h - 4)
+	while r >= wd.cell(to_y - h):
+		if wd.is_solid(c, r):
+			return false
+		r -= 1
+	return true
+
+
+func _body_hit(r: Rect2) -> bool:
+	var p := game.player
+	if r.intersects(p.hurtbox()):
+		p.take_hit(position.x)
+		return true
+	return false
+
+
+## true when the brain drove this frame
+func _brain(dt: float) -> bool:
+	var p := game.player
+	var l := smarts()
+	var dx := p.position.x - position.x
+	var dy := p.position.y - position.y
+	var adx := absf(dx)
+	var s := 1 if position.x > p.position.x else -1
+	ai_cd -= dt * _rate()
+	dodge_cd -= dt
+	jump_cd -= dt
+	drop_t = maxf(0, drop_t - dt)
+	if stun > 0 and kind != Kind.BRUTE:
+		# a hit staggers them out of whatever they were doing
+		if mode != "vault":
+			mode = ""
+		tele = 0
+		return false
+	if mode != "":
+		return _brain_act(dt, dx, l)
+	if kind == Kind.HEXER:
+		return _hexer_brain(dt, dx, dy, l)
+	if not ground or act > 0:
+		return false
+	# sidestep the player's swing, read in its first moments
+	if p.atk != null and p.atk.t < 0.09 and dodge_cd <= 0 and (position.x - p.position.x) * p.facing > -10 \
+			and adx < p.reach + 60 and absf(dy) < 60 and kind != Kind.BRUTE:
+		dodge_cd = 1.4
+		if randf() < 0.14 + l * 0.36 + (0.2 if elite == "SWIFT" else 0.0) and _floor_at(position.x + s * 60, position.y):
+			vel = Vector2(s * 430, -430)
+			ground = false
+			mode = "hop"
+			mt = 0.5
+			ai_cd = minf(ai_cd, 0.25)
+			return true
+	# climb to the player's platform
+	if kind != Kind.BRUTE and kind != Kind.SNUFFER and jump_cd <= 0 and dy < -56 and dy > -270 and adx < 240 and p.ground and _headroom(p.position.y, signf(dx)):
+		var vy := -minf(1060, sqrt(2 * gravity * (-dy + 34)))
+		var t := -vy / gravity
+		vel = Vector2(clampf(dx / (t * 1.7), -320, 320), vy)
+		ground = false
+		jump_cd = randf_range(0.9, 1.5)
+		facing = 1 if dx > 0 else -1
+		return true
+	# or drop through a bridge to reach them
+	if dy > 56 and adx < 220 and on_one_way and jump_cd <= 0:
+		drop_t = 0.25
+		vel.y = 60
+		ground = false
+		jump_cd = 0.8
+		return true
+	if absf(dy) < 44:
+		# surround: with the player's back open and this side crowded, vault over them
+		if (kind == Kind.HOLLOW or kind == Kind.DROWNED) and game.depth >= 2 and adx < 170 and (vault_at <= game.run_time or vault_at > game.run_time + 5.0) \
+				and _side_count(s) >= 2 and _side_count(-s) == 0 and _floor_at(p.position.x - s * 80, p.position.y) \
+				and not _wall_at(p.position.x - s * 80, p.position.y - 30) and _headroom(position.y - 140, -s):
+			vault_at = game.run_time + randf_range(2.2, 3.4) - l
+			var T := 2 * 760 / gravity
+			vel = Vector2(clampf((p.position.x - s * 80 - position.x) / T, -420, 420), -760)
+			ground = false
+			mode = "vault"
+			mt = T + 0.2
+			facing = -s
+			return true
+		if ai_cd <= 0 and busy_count(game) < _tokens():
+			if kind == Kind.HOLLOW and adx > 28 and adx < 175:
+				return _windup("lunge", (0.36 - 0.1 * l) / _rate(), dx)
+			if kind == Kind.BRUTE and adx > 200 and adx < 560 and game.depth >= 6 and stun <= 0:
+				return _windup("charge", 0.65 / _rate(), dx)
+			if kind == Kind.FORGED and adx < 640:
+				return _windup("throw", 0.45 / _rate(), dx)
+	elif kind == Kind.FORGED and ai_cd <= 0 and adx < 520 and dy > -260 and dy < 0 and busy_count(game) < _tokens():
+		return _windup("throw", 0.45 / _rate(), dx)
+	# hold a little space instead of piling into one spot
+	if kind == Kind.HOLLOW and adx < 60 and adx > 26 and ai_cd > 0.4:
+		vel.x = move_toward(vel.x, 0, 900 * dt)
+		return true
+	# the forged only throw through the brain now
+	if kind == Kind.FORGED:
+		_walk(dt, speed, false)
+		return true
+	return false
+
+
+func _windup(k: String, t: float, dx: float) -> bool:
+	mode = "wind"
+	next_move = k
+	tele = t
+	tele_max = t
+	facing = 1 if dx > 0 else -1
+	vel.x *= 0.3
+	if k == "throw":
+		act = t
+	return true
+
+
+func _brain_act(dt: float, dx: float, l: float) -> bool:
+	var p := game.player
+	match mode:
+		"hop", "vault":
+			mt -= dt
+			air_t += dt
+			if mode == "vault" and vel.y > 0:
+				_body_hit(hurtbox().grow(-4))
+			if mt <= 0 or (ground and air_t > 0.12):
+				mode = ""
+				air_t = 0
+			return not ground
+		"wind":
+			tele -= dt
+			vel.x = move_toward(vel.x, 0, 1600 * dt)
+			if tele > tele_max * 0.5 and next_move != "charge":
+				facing = 1 if dx > 0 else -1
+			if tele > 0:
+				return true
+			tele = 0
+			match next_move:
+				"lunge":
+					var lead := clampf(p.vel.x * 0.18 * l, -60, 60)
+					var vx := clampf((dx + lead) * 3.6, -600, 600)
+					vel = Vector2(vx if absf(vx) > 1 else facing * 400.0, -230)
+					ground = false
+					mode = "lunge"
+					mt = 0.42
+				"charge":
+					mode = "charge"
+					mt = 1.1
+					vel.x = facing * 560 * _rate()
+				"throw":
+					act = 0
+					_throw_blade(l)
+					mode = "recover"
+					mt = 0.25
+			return true
+		"lunge":
+			mt -= dt
+			if _body_hit(hurtbox()):
+				mt = minf(mt, 0.05)
+			if mt <= 0 or (ground and mt < 0.3):
+				mode = ""
+				ai_cd = randf_range(1.5, 2.3) - 0.7 * l
+			return not ground
+		"charge":
+			mt -= dt
+			vel.x = facing * 560 * _rate()
+			if randf() < 0.5:
+				game.fx.spark(position + Vector2(-facing * 14, -6))
+			if _body_hit(hurtbox().grow(2)):
+				mt = 0
+			if mt <= 0 or wall == facing or not _floor_at(position.x + facing * 26, position.y):
+				mode = "recover"
+				mt = 0.6
+				vel.x = 0
+				game.shake(0.1, 5)
+			return true
+		"recover":
+			mt -= dt
+			vel.x = move_toward(vel.x, 0, 1600 * dt)
+			if mt <= 0:
+				mode = ""
+				ai_cd = randf_range(1.6, 2.4) - 0.6 * l
+			return true
+	mode = ""
+	return false
+
+
+func _throw_blade(l: float) -> void:
+	var p := game.player
+	var from := position + Vector2(facing * 16, -34)
+	var sp := 540.0
+	var aim := p.position + Vector2(0, -28)
+	var t := from.distance_to(aim) / sp
+	aim.x += clampf(p.vel.x * t * (0.4 + 0.5 * l), -200, 200)
+	if not p.ground:
+		aim.y += clampf(p.vel.y * t * 0.4, -120, 120)
+	var dir := (aim - from).normalized()
+	var same_floor := absf(p.position.y - position.y) < 44
+	if same_floor:
+		dir = Vector2(facing, 0)
+	game.hexes.append({"pos": from, "vel": dir * sp, "life": 1.8, "blade": true})
+	if game.depth >= 10 and same_floor:
+		# a high blade too, so a jump alone won't clear both
+		game.hexes.append({"pos": from + Vector2(0, -34), "vel": Vector2(facing * sp * 0.85, 0), "life": 2.0, "blade": true})
+
+
+func _lob(from: Vector2, to: Vector2, t: float) -> void:
+	game.hexes.append({"pos": from, "vel": Vector2((to.x - from.x) / t, (to.y - from.y - 0.5 * 900 * t * t) / t), "life": 3.0})
+
+
+func _hexer_brain(dt: float, dx: float, dy: float, l: float) -> bool:
+	var p := game.player
+	if ground:
+		vel.x = move_toward(vel.x, 0, 900 * dt)
+	facing = 1 if dx > 0 else -1
+	if not ground or stun > 0:
+		return true
+	# keep its distance: hop away when the player closes in
+	if absf(dx) < 150 and absf(dy) < 60 and hop_cd <= 0 and _floor_at(position.x - facing * 90, position.y) and not _wall_at(position.x - facing * 40, position.y - 30):
+		hop_cd = 2.6 - l
+		vel = Vector2(-facing * 380, -560)
+		ground = false
+		return true
+	if tele > 0:
+		tele -= dt
+		if tele <= 0:
+			var t := 0.9
+			var from := position + Vector2(facing * 14, -70)
+			var lead := clampf(p.vel.x * t * (0.45 + 0.5 * l), -260, 260)
+			var ty := p.position.y - 28
+			_lob(from, Vector2(p.position.x + lead, ty), t)
+			if game.depth >= 7:
+				# bracket: one where you stand, one past where you're heading
+				var dir := signf(lead) if absf(lead) > 1 else float(p.facing)
+				_lob(from, Vector2(p.position.x, ty), t * 1.1)
+				_lob(from, Vector2(p.position.x + lead * 1.8 + dir * 50, ty), t * 0.95)
+		return true
+	if act_cd <= 0 and position.distance_to(p.position) < 620:
+		tele = 0.45
+		tele_max = 0.45
+		act_cd = randf_range(2.0, 3.0) - 0.5 * l
+	return true
 
 
 func _walk(dt: float, spd: float, can_hop: bool) -> void:
@@ -121,17 +430,32 @@ func _fly(dt: float) -> void:
 	var target := p.position + Vector2(0, -40)
 	if stun > 0:
 		vel = vel.move_toward(Vector2.ZERO, 900 * dt)
+		act = 0
+		tele = 0
 	elif act > 0:
 		act -= dt
-		vel = dive_dir * 520
+		vel = dive_dir * 560 * _rate()
+		if act <= 0:
+			act_cd = randf_range(1.5, 2.6) - 0.6 * smarts()
+	elif tele > 0:
+		# shudder, then dive at where the player is going
+		tele -= dt
+		vel = vel.move_toward(Vector2.ZERO, 1200 * dt)
+		position.x += randf_range(-2, 2)
+		if tele <= 0:
+			var l := smarts()
+			var aim := target + Vector2(clampf(p.vel.x * 0.3 * (0.5 + 0.5 * l), -120, 120), 0.0 if p.ground else clampf(p.vel.y * 0.15, -80, 80))
+			dive_dir = (aim - position).normalized()
+			act = 0.5
 	else:
-		var hover := target + Vector2(0, -110)
+		# circle to the player's back, each wing on its own slot
+		side_off = lerpf(side_off, -p.facing * (70.0 + float(get_instance_id() % 5) * 14.0), 0.02 + 0.03 * smarts())
+		var hover := target + Vector2(side_off, -110)
 		vel = vel.move_toward((hover - position).normalized() * speed, 600 * dt)
 		vel.y += sin(ph * 3) * 40
-		if act_cd <= 0 and position.distance_to(target) < 260:
-			dive_dir = (target - position).normalized()
-			act = 0.45
-			act_cd = randf_range(1.6, 2.6)
+		if act_cd <= 0 and position.distance_to(target) < 230 and busy_count(game) < _tokens() + 1:
+			tele = 0.32
+			tele_max = 0.32
 	facing = 1 if p.position.x > position.x else -1
 	position += vel * dt
 	position = position.clamp(Vector2(20, 20), game.world.size - Vector2(20, 20))
@@ -187,7 +511,8 @@ func _drowned(dt: float) -> void:
 		act -= dt
 		vel.x = move_toward(vel.x, 0, 1600 * dt)
 		if act <= 0:
-			vel = Vector2(clampf(dx * 1.6, -560, 560), -640)
+			# pounce at where the player is going
+			vel = Vector2(clampf((dx + clampf(p.vel.x * 0.35, -140, 140)) * 1.6, -600, 600), -640)
 			ground = false
 		return
 	if ground and stun <= 0 and act_cd <= 0 and absf(dx) < 300 and absf(p.position.y - position.y) < 80:
@@ -330,6 +655,16 @@ func _draw() -> void:
 			draw_circle(Vector2(facing * 14, -36), 5, Color(1, 0.55, 0.36, 0.5))
 		if kind == Kind.HEXER and act > 0:
 			draw_circle(Vector2(facing * 10, -40 - 30), 6 + (0.5 - act) * 10, Color(0.7, 0.3, 1, 0.8))
+	if tele > 0:
+		# danger mark over the head during every wind-up
+		var k := clampf(1.0 - tele / tele_max, 0, 1)
+		var c := Color(1, 0.27, 0.24, 0.35 + 0.55 * k)
+		var top3 := (-h / 2 - 30) if kind == Kind.GLOOMWING else (-h - 30)
+		draw_colored_polygon(PackedVector2Array([Vector2(-4, top3), Vector2(4, top3), Vector2(1.5, top3 + 12), Vector2(-1.5, top3 + 12)]), c)
+		draw_circle(Vector2(0, top3 + 17), 2.2, c)
+		if next_move == "charge" or next_move == "lunge":
+			var len := 300.0 if next_move == "charge" else 150.0
+			draw_rect(Rect2(minf(0, facing * len), -4, len, 4), Color(0.9, 0.22, 0.23, 0.35 * k))
 	if hp < max_hp:
 		var top := -h / 2 - 14 if kind == Kind.GLOOMWING else -h - 12
 		draw_rect(Rect2(-16, top, 32, 4), Color(0, 0, 0, 0.8))
