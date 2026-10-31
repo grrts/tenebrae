@@ -26,3 +26,34 @@ jobs:
           fi
           grep -q "smoke test: done" smoke.log || { echo "::error::smoke test did not finish: $(tail -c 2000 smoke.log | paste -sd'|')"; exit 1; }
           echo "No script errors"
+
+  # Every green push to main becomes a downloadable playtest build on the Releases page.
+  release:
+    needs: godot
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    container: barichello/godot-ci:4.3
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install export templates
+        run: |
+          mkdir -p ~/.local/share/godot/export_templates/
+          mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable || true
+      - name: Export Windows and Linux
+        run: |
+          mkdir -p build/windows build/linux
+          godot --headless --import >/dev/null 2>&1 || true
+          godot --headless --export-release "Windows" build/windows/Tenebrae.exe
+          godot --headless --export-release "Linux" build/linux/Tenebrae.x86_64
+          cd build && zip -qr ../Tenebrae-windows.zip windows && zip -qr ../Tenebrae-linux.zip linux
+          ls -la ..
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: playtest-${{ github.run_number }}
+          name: Playtest ${{ github.run_number }}
+          body: "Automatic playtest build of ${{ github.sha }}. Download the zip for your system, unzip, and run Tenebrae."
+          files: |
+            Tenebrae-windows.zip
+            Tenebrae-linux.zip
