@@ -30,6 +30,7 @@ var light_tex: GradientTexture2D
 var depth := 1
 var depth_t := 0.0
 var hidden_candle := true
+var boss: Boss = null
 
 var map_i := 1
 var hitstop := 0.0
@@ -106,6 +107,7 @@ func start(i: int) -> void:
 	for e in enemies:
 		e.queue_free()
 	enemies.clear()
+	boss = null
 	if player:
 		player.queue_free()
 	hexes.clear()
@@ -162,7 +164,8 @@ func _physics_process(dt: float) -> void:
 		if dead_t > 1.6:
 			start(map_i)
 		return
-	depth_t += dt
+	if boss == null:
+		depth_t += dt
 	if depth_t >= depth_time:
 		next_depth()
 	for i in brazier_t.size():
@@ -170,7 +173,7 @@ func _physics_process(dt: float) -> void:
 	_step_hexes(dt)
 	spawn_t -= dt
 	var alive := enemies.filter(func(e): return not e.dead).size()
-	if spawn_t <= 0 and alive < mini(22, 4 + depth * 2) and world.portals.size() > 0:
+	if spawn_t <= 0 and alive < (4 if boss else mini(22, 4 + depth * 2)) and world.portals.size() > 0:
 		spawn_t = maxf(0.6, SPAWN_EVERY - depth * 0.15)
 		_spawn()
 
@@ -178,12 +181,32 @@ func _physics_process(dt: float) -> void:
 func next_depth() -> void:
 	depth_t = 0.0
 	depth += 1
-	if candles_out() == 0:
+	if depth % 4 == 0:
+		_spawn_boss()
+	elif candles_out() == 0:
 		hud.show_banner("DEPTH %s" % roman(depth), "THE CANDLES ARE RELIT · THE DARK COMES FASTER", 2.2)
 	else:
 		var sub: String = {2: "GLOOMWINGS JOIN", 3: "HEXERS APPEAR", 5: "BRUTES APPEAR"}.get(depth, "ENEMIES +%d%% HP" % roundi((hp_mul() - 1) * 100))
 		hud.show_banner("DEPTH %s · A CANDLE GOES OUT" % roman(depth), sub)
 	shake(0.15, 4)
+
+
+## The strepitus: in the service a loud crash ends the darkness. Here it brings the boss down.
+func _spawn_boss() -> void:
+	boss = Boss.new()
+	boss.game = self
+	boss.setup_boss(hp_mul())
+	var x := clampf(player.position.x + (420.0 if player.position.x < world.size.x / 2 else -420.0), 120, world.size.x - 120)
+	var y := player.position.y - 300
+	if world.is_solid(world.cell(x), world.cell(y)) or world.is_solid(world.cell(x), world.cell(y - 100)):
+		x = player.position.x
+	boss.position = Vector2(x, y)
+	add_child(boss)
+	move_child(boss, world.get_index() + 1)
+	enemies.append(boss)
+	shake(0.7, 18)
+	hitstop = 0.15
+	hud.show_banner("DEPTH %s · STREPITUS" % roman(depth), "THE CHAIN WARDEN DESCENDS", 2.4)
 
 
 func hp_mul() -> float:
@@ -301,6 +324,12 @@ func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 		kills += 1
 		fx.burst(e.position + Vector2(0, -28), 18, Color("#0a0a0d"), 260)
 		e.visible = false
+		if e == boss:
+			boss = null
+			hitstop = 0.25
+			shake(0.5, 14)
+			fx.ring(e.position, 320, Color("#f2b43a"))
+			hud.show_banner("WARDEN SLAIN", "THE CLIMB GOES ON", 2.4)
 
 
 func on_player_dead() -> void:
