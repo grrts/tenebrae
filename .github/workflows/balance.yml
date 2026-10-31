@@ -25,7 +25,9 @@ jobs:
       - name: Play runs
         run: |
           timeout 2400 godot --headless -- --balance "${{ github.event.inputs.runs || '6' }}" "${{ github.event.inputs.vigil || '0' }}" 2>&1 | tee balance.log
-          grep "balance:" balance.log | while read -r l; do echo "::notice::$l"; done
+          # GitHub keeps 10 annotations per step, so runs, summary and hits go out as three
+          echo "::notice::$(grep -E 'balance: (run|summary|[0-9]+ runs)' balance.log | paste -sd'|')"
+          echo "::notice::$(grep 'balance: HIT' balance.log | sed -E 's/balance: HIT at //' | cut -c1-160 | head -60 | paste -sd'|' | cut -c1-6000)"
           if grep -nE "SCRIPT ERROR|Invalid call|Invalid access" balance.log | head -5 | grep -q .; then grep -nE -A1 "SCRIPT ERROR|Invalid call|Invalid access" balance.log | head -20 | paste -sd'|' | sed 's/^/::error::/'; exit 1; fi
           grep -q "balance: done" balance.log
       - uses: actions/upload-artifact@v4
