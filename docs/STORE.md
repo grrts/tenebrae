@@ -62,7 +62,7 @@ Drafts of the header, small and main capsules are in `docs/store/`, cut from a r
 
 ## Trailer shot list (75 seconds)
 
-Capture at 1080p60 from the Godot build with the HUD off except where noted. Music: the boss theme, cut to the hits.
+Capture at 1080p60 from the Godot build with the HUD off (F10 toggles it) except where noted. Music: the boss theme, cut to the hits.
 
 | Time | Shot | Notes |
 | --- | --- | --- |
