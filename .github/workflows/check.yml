@@ -44,9 +44,15 @@ jobs:
       - name: Export Windows and Linux
         run: |
           mkdir -p build/windows build/linux
+          echo "templates: $(ls ~/.local/share/godot/export_templates/ 2>&1) home=$HOME"
           godot --headless --import >/dev/null 2>&1 || true
-          godot --headless --export-release "Windows" build/windows/Tenebrae.exe
-          godot --headless --export-release "Linux" build/linux/Tenebrae.x86_64
+          ok=1
+          for p in Windows:build/windows/Tenebrae.exe Linux:build/linux/Tenebrae.x86_64; do
+            godot --headless --export-release "${p%%:*}" "${p#*:}" > export.log 2>&1 || ok=0
+            [ -f "${p#*:}" ] || ok=0
+            grep -E "ERROR|error|rror:" export.log | awk '!seen[$0]++' | head -20 | paste -sd'|' | sed 's/^/::warning::'"${p%%:*}"' export: /'
+          done
+          [ "$ok" = 1 ] || { echo "::error::export failed, templates: $(ls -R ~/.local/share/godot/export_templates/ | head -20 | paste -sd' ')"; exit 1; }
           cd build && zip -qr ../Tenebrae-windows.zip windows && zip -qr ../Tenebrae-linux.zip linux
           ls -la ..
       - uses: softprops/action-gh-release@v2
