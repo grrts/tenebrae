@@ -24,6 +24,7 @@ var toasts: Array = []
 var hp_show := 1.0
 var flash_col := Color.WHITE
 var flash_t := 0.0
+var _digit_held := [false, false, false, false, false, false, false, false, false]
 
 
 func busy() -> bool:
@@ -64,8 +65,9 @@ func _card_start() -> void:
 		game.shake(0.35, 14)
 
 
-func open_choice(title: String, sub: String, opts: Array, cb: Callable) -> void:
-	menu = {"title": title, "sub": sub, "opts": opts, "pick": 0, "cb": cb, "t": 0.0}
+## cancel runs on Escape / Backspace / B; without one those keys do nothing here.
+func open_choice(title: String, sub: String, opts: Array, cb: Callable, cancel := Callable()) -> void:
+	menu = {"title": title, "sub": sub, "opts": opts, "pick": 0, "cb": cb, "t": 0.0, "cancel": cancel}
 
 
 func open_summary(data: Dictionary) -> void:
@@ -99,14 +101,14 @@ func _process(dt: float) -> void:
 			game.vigil = maxi(0, game.vigil - 1)
 		if Input.is_action_just_pressed("right"):
 			game.vigil = mini(game.vigil_max, game.vigil + 1)
-		if title_screen.t > 0.4 and (Input.is_action_just_pressed("jump") or Input.is_action_just_pressed("attack")):
+		if title_screen.t > 0.4 and game.ok_pressed():
 			var tcb: Callable = title_screen.cb
 			title_screen = null
 			tcb.call()
 	elif scene != null:
 		scene.t += dt
 		var c: Dictionary = scene.cards[scene.i]
-		var press: bool = scene.t > 0.35 and (Input.is_action_just_pressed("jump") or Input.is_action_just_pressed("attack"))
+		var press: bool = scene.t > 0.35 and game.ok_pressed()
 		var skip := Input.is_action_just_pressed("ui_cancel")
 		if skip or press or scene.t > _card_dur(c):
 			scene.i += 1
@@ -120,17 +122,33 @@ func _process(dt: float) -> void:
 	elif menu != null:
 		menu.t += dt
 		var n: int = menu.opts.size()
-		if Input.is_action_just_pressed("left"):
-			menu.pick = (menu.pick + n - 1) % n
-		if Input.is_action_just_pressed("right"):
-			menu.pick = (menu.pick + 1) % n
-		if menu.t > 0.3 and (Input.is_action_just_pressed("jump") or Input.is_action_just_pressed("attack")):
-			var m = menu
+		if menu.get("locked", false):
+			pass
+		elif menu.t > 0.15 and menu.cancel.is_valid() and (Input.is_action_just_pressed("pause") or Input.is_action_just_pressed("back")):
+			var mc = menu
 			menu = null
-			m.cb.call(m.pick)
+			mc.cancel.call()
+		else:
+			if Input.is_action_just_pressed("left") or Input.is_action_just_pressed("up"):
+				menu.pick = (menu.pick + n - 1) % n
+			if Input.is_action_just_pressed("right") or Input.is_action_just_pressed("down"):
+				menu.pick = (menu.pick + 1) % n
+			# 1-9 pick and confirm in one press
+			var direct := -1
+			for d in mini(n, 9):
+				if Input.is_physical_key_pressed(KEY_1 + d) and not game.is_bound(KEY_1 + d) and menu.t > 0.3 and not _digit_held[d]:
+					direct = d
+			for d in 9:
+				_digit_held[d] = Input.is_physical_key_pressed(KEY_1 + d)
+			if direct >= 0:
+				menu.pick = direct
+			if menu.t > 0.3 and (direct >= 0 or game.ok_pressed()):
+				var m = menu
+				menu = null
+				m.cb.call(m.pick)
 	elif summary != null:
 		summary.t += dt
-		if summary.t > 1.2 and (Input.is_action_just_pressed("jump") or Input.is_action_just_pressed("attack")):
+		if summary.t > 1.2 and game.ok_pressed():
 			summary = null
 			game.start(0)
 	elif Input.is_action_just_pressed("pause") and game.player != null and not game.player.dead:
@@ -227,7 +245,7 @@ func _paint_title(vp: Vector2) -> void:
 	var stats := "BANKED ASH %d   ·   DEEPEST %s   ·   DAWNS %d" % [game.bank, Game.roman(maxi(1, game.best_depth)), game.wins]
 	_text(stats + "   ·   ACHIEVEMENTS %d / %d" % [game.achieved.size(), Achievements.LIST.size()], Vector2(mid.x, vp.y - 110), 13, Color(0.6, 0.57, 0.54), true)
 	var blink := 0.5 + 0.5 * sin(t * 4)
-	_text("PRESS SPACE OR J TO DESCEND", Vector2(mid.x, vp.y - 70), 16, Color(0.95, 0.92, 0.88, 0.4 + 0.6 * blink), true)
+	_text("PRESS %s OR ENTER TO DESCEND" % game.key_label("attack"), Vector2(mid.x, vp.y - 70), 16, Color(0.95, 0.92, 0.88, 0.4 + 0.6 * blink), true)
 
 
 ## Souls-like death: a black band fades in and EXTINGUISHED slowly grows in it.
@@ -292,7 +310,7 @@ func _paint_scene(vp: Vector2) -> void:
 		var lines := _wrap(String(c.text), minf(760, vp.x - 80), 22)
 		for i in lines.size():
 			_text(lines[i], Vector2(mid.x, y + i * 32), 22, Color(0.92, 0.88, 0.84, a), true)
-	_text("SPACE / J  NEXT      ESC  SKIP", Vector2(vp.x - 130, vp.y - 30), 11, Color(0.55, 0.5, 0.47), true)
+	_text("%s / ENTER  NEXT      ESC  SKIP" % game.key_label("attack"), Vector2(vp.x - 130, vp.y - 30), 11, Color(0.55, 0.5, 0.47), true)
 
 
 func _paint_menu(vp: Vector2) -> void:
@@ -322,7 +340,7 @@ func _paint_menu(vp: Vector2) -> void:
 				line = ""
 			line += " " + wd
 		_text(line.strip_edges(), Vector2(r.position.x + cw / 2, y), 15, Color(0.85, 0.8, 0.75), true)
-	_text("LEFT / RIGHT  CHOOSE      SPACE / J  CONFIRM", Vector2(vp.x / 2, 500), 13, Color(0.5, 0.47, 0.44), true)
+	_text(("WAITING FOR A KEY  ·  ESC CANCELS" if menu.get("locked", false) else "ARROWS  CHOOSE      %s / ENTER / 1-%d  CONFIRM%s" % [game.key_label("attack"), mini(9, menu.opts.size()), "      ESC  BACK" if menu.cancel.is_valid() else ""]), Vector2(vp.x / 2, 500), 13, Color(0.5, 0.47, 0.44), true)
 
 
 func _paint_summary(vp: Vector2) -> void:
@@ -339,7 +357,7 @@ func _paint_summary(vp: Vector2) -> void:
 	if s.unlocked != "":
 		_text("UNLOCKED · %s" % s.unlocked, Vector2(vp.x / 2, 380), 30, Color("#f2b43a"), true)
 	if s.t > 1.2:
-		_text("PRESS SPACE OR J TO RELIGHT THE CANDLES", Vector2(vp.x / 2, vp.y - 60), 14, Color(0.6, 0.57, 0.54), true)
+		_text("PRESS %s OR ENTER TO RELIGHT THE CANDLES" % game.key_label("attack"), Vector2(vp.x / 2, vp.y - 60), 14, Color(0.6, 0.57, 0.54), true)
 
 
 func _hearse(o: Vector2) -> void:

@@ -201,6 +201,23 @@ func _smoke(dt: float) -> void:
 				m.cb.call(0)
 				print("smoke test: options ok, shake %.1f" % opt_shake)
 				opt_shake = 1.0
+				# controls: rebind jump to L, check the map and the dev keys, then back to defaults
+				open_controls()
+				m = hud.menu
+				hud.menu = null
+				m.cb.call(REBINDABLE.find("jump"))
+				var kev := InputEventKey.new()
+				kev.physical_keycode = KEY_L
+				kev.pressed = true
+				_input(kev)
+				var kl := InputEventKey.new()
+				kl.physical_keycode = KEY_L
+				var ok_bind: bool = keys_of("jump")[0] == KEY_L and InputMap.action_has_event("jump", kl) and is_bound(KEY_L) and rebinding == ""
+				binds.clear()
+				_setup_input()
+				_save_meta()
+				hud.menu = null
+				print("smoke test: controls %s, jump keys %s" % ["ok" if ok_bind and keys_of("jump")[0] == KEY_SPACE else "FAILED", " / ".join(keys_of("jump").map(key_name))])
 				hud.open_title(_smoke_title_ok)
 		3:
 			# every arena loads and runs briefly
@@ -306,11 +323,15 @@ func _begin() -> void:
 func open_pause() -> void:
 	var opts := [
 		{"id": "resume", "name": "RESUME", "desc": "Back into the dark.", "tag": ""},
-		{"id": "options", "name": "OPTIONS", "desc": "Screen shake and fullscreen.", "tag": ""},
+		{"id": "options", "name": "OPTIONS", "desc": "Screen shake, fullscreen and controls.", "tag": ""},
 		{"id": "restart", "name": "RESTART", "desc": "Abandon this run. Ash you carry is lost.", "tag": ""},
 		{"id": "title", "name": "TITLE", "desc": "Abandon this run and return to the title.", "tag": ""},
 	]
-	hud.open_choice("PAUSED", "DEPTH %s  ·  %s" % [roman(depth), Story.CHAPTERS[chapter()].name], opts, _pause_pick.bind(opts))
+	hud.open_choice("PAUSED", "DEPTH %s  ·  %s" % [roman(depth), Story.CHAPTERS[chapter()].name], opts, _pause_pick.bind(opts), _resume)
+
+
+func _resume() -> void:
+	pass
 
 
 func _pause_pick(i: int, opts: Array) -> void:
@@ -335,9 +356,10 @@ func open_options() -> void:
 		{"id": "speed", "name": "SPEED %d%%" % roundi(opt_speed * 100), "desc": "Assist: slow the whole game to 85 or 70%. Achievements still count.", "tag": "ASSIST"},
 		{"id": "hearts", "name": "+40 HP %s" % ("ON" if opt_hearts else "OFF"), "desc": "Assist: start each run with 40 extra HP. Applies next run.", "tag": "ASSIST"},
 		{"id": "full", "name": "FULLSCREEN %s" % ("ON" if opt_fullscreen else "OFF"), "desc": "Fill the screen, or play in a window.", "tag": "OPTION"},
+		{"id": "controls", "name": "CONTROLS", "desc": "Rebind keys and mouse buttons. A controller always works.", "tag": "OPTION"},
 		{"id": "back", "name": "BACK", "desc": "Return to the pause menu.", "tag": ""},
 	]
-	hud.open_choice("OPTIONS", "SAVED BETWEEN SESSIONS", opts, _option_pick.bind(opts))
+	hud.open_choice("OPTIONS", "SAVED BETWEEN SESSIONS", opts, _option_pick.bind(opts), open_pause)
 
 
 func _option_pick(i: int, opts: Array) -> void:
@@ -356,11 +378,56 @@ func _option_pick(i: int, opts: Array) -> void:
 		"full":
 			opt_fullscreen = not opt_fullscreen
 			_apply_options()
+		"controls":
+			open_controls()
+			return
 		"back":
 			open_pause()
 			return
 	_save_meta()
 	open_options()
+
+
+const CONTROL_NAMES := {"left": "MOVE LEFT", "right": "MOVE RIGHT", "up": "UP", "down": "DOWN", "jump": "JUMP", "attack": "ATTACK", "dash": "DASH"}
+const CONTROL_DESC := {"left": "", "right": "", "up": "Also jumps while UP JUMPS is on.", "down": "Drop through bridges (with jump), slam (with attack in the air).",
+	"jump": "Jump, double jump, wall jump. Hold for height.", "attack": "Tap to swing, hold to keep the combo going.", "dash": "I-frames. Cancels any swing."}
+
+
+func open_controls() -> void:
+	var opts := []
+	for a in REBINDABLE:
+		var names := []
+		for k in keys_of(a):
+			names.append(key_name(k))
+		opts.append({"id": a, "name": "%s  %s" % [CONTROL_NAMES[a], " / ".join(names)],
+			"desc": "PRESS A KEY OR MOUSE BUTTON  ·  ESC CANCELS" if rebinding == a else "%s Pick to rebind." % CONTROL_DESC[a], "tag": "REBIND"})
+	opts.append({"id": "upjump", "name": "UP JUMPS %s" % ("ON" if opt_up_jump else "OFF"), "desc": "W and Up also jump.", "tag": "OPTION"})
+	opts.append({"id": "reset", "name": "DEFAULTS", "desc": "WASD + Space / J / K or mouse, and arrows + Z / X / C.", "tag": "OPTION"})
+	opts.append({"id": "back", "name": "BACK", "desc": "Return to the options.", "tag": ""})
+	hud.open_choice("CONTROLS", "WAITING FOR A KEY" if rebinding != "" else "SAVED BETWEEN SESSIONS", opts, _controls_pick.bind(opts), open_options)
+	if rebinding != "":
+		hud.menu.pick = REBINDABLE.find(rebinding)
+		hud.menu.locked = true
+
+
+func _controls_pick(i: int, opts: Array) -> void:
+	var id: String = opts[i].id
+	match id:
+		"upjump":
+			opt_up_jump = not opt_up_jump
+			_setup_input()
+			_save_meta()
+		"reset":
+			binds.clear()
+			opt_up_jump = true
+			_setup_input()
+			_save_meta()
+		"back":
+			open_options()
+			return
+		_:
+			rebinding = id
+	open_controls()
 
 
 func _apply_options() -> void:
@@ -580,6 +647,9 @@ func _load_meta() -> void:
 		opt_hitstop = cfg.get_value("options", "hitstop", true)
 		opt_speed = cfg.get_value("options", "speed", 1.0)
 		opt_hearts = cfg.get_value("options", "hearts", false)
+		opt_up_jump = cfg.get_value("controls", "up_jump", true)
+		binds = cfg.get_value("controls", "binds", {})
+		_setup_input()
 
 
 func _save_meta() -> void:
@@ -598,6 +668,8 @@ func _save_meta() -> void:
 	cfg.set_value("options", "hitstop", opt_hitstop)
 	cfg.set_value("options", "speed", opt_speed)
 	cfg.set_value("options", "hearts", opt_hearts)
+	cfg.set_value("controls", "up_jump", opt_up_jump)
+	cfg.set_value("controls", "binds", binds)
 	cfg.save(SAVE_PATH)
 
 
@@ -1020,9 +1092,18 @@ func _draw_debug() -> void:
 		dbg.draw_rect(b[0], b[1])
 
 
+func is_bound(code: int) -> bool:
+	for a in REBINDABLE:
+		if keys_of(a).has(code):
+			return true
+	return false
+
+
 func _unhandled_input(ev: InputEvent) -> void:
 	var k := ev as InputEventKey
-	if k and k.pressed and not k.echo:
+	# dev keys never fire while a menu is up or when you have bound that key to a move
+	if k and k.pressed and not k.echo and rebinding == "" and not is_bound(k.physical_keycode) \
+			and (not hud.busy() or k.physical_keycode in [KEY_F1, KEY_F2]):
 		match k.physical_keycode:
 			KEY_F1:
 				show_debug = not show_debug
@@ -1041,25 +1122,71 @@ func _unhandled_input(ev: InputEvent) -> void:
 				start(k.physical_keycode - KEY_1)
 
 
-## Keyboard + controller bindings, created at runtime so project.godot stays readable.
+## Keyboard, mouse and controller bindings, created at runtime so project.godot stays readable.
+## Two full hands work out of the box: WASD + Space / J / K (or the mouse), and arrows + Z / X / C.
+## Keys are physical, so WASD stays under the same fingers on AZERTY and QWERTZ.
+## The first key of jump, attack and dash (and the moves) can be rebound in Options > Controls.
+const DEFAULT_KEYS := {
+	"left": [KEY_A, KEY_LEFT], "right": [KEY_D, KEY_RIGHT], "up": [KEY_W, KEY_UP], "down": [KEY_S, KEY_DOWN],
+	"jump": [KEY_SPACE, KEY_Z], "attack": [KEY_J, KEY_X, -MOUSE_BUTTON_LEFT], "dash": [KEY_SHIFT, KEY_K, KEY_C, -MOUSE_BUTTON_RIGHT],
+	"pause": [KEY_ESCAPE, KEY_P], "confirm": [KEY_ENTER, KEY_KP_ENTER], "back": [KEY_BACKSPACE],
+}
+const REBINDABLE := ["left", "right", "up", "down", "jump", "attack", "dash"]
+var binds := {} ## action -> its first key (a physical keycode, or -mouse button), when the player changed it
+var opt_up_jump := true ## W / Up also jump
+var rebinding := "" ## the action waiting for a key in Options > Controls
+
+
+func keys_of(action: String) -> Array:
+	var mine := binds.values()
+	var d: Array = DEFAULT_KEYS[action]
+	var first = binds.get(action, d[0])
+	var out := [first]
+	for k in d.slice(1):
+		if k != first and not mine.has(k):
+			out.append(k)
+	return out
+
+
+func key_name(k: int) -> String:
+	match k:
+		-MOUSE_BUTTON_LEFT: return "LMB"
+		-MOUSE_BUTTON_RIGHT: return "RMB"
+		-MOUSE_BUTTON_MIDDLE: return "MMB"
+		KEY_LEFT: return "←"
+		KEY_RIGHT: return "→"
+		KEY_UP: return "↑"
+		KEY_DOWN: return "↓"
+	if k < 0:
+		return "MB%d" % -k
+	return OS.get_keycode_string(k).to_upper()
+
+
+func key_label(action: String) -> String:
+	return key_name(keys_of(action)[0])
+
+
 func _setup_input() -> void:
-	var keys := {
-		"left": [KEY_A, KEY_LEFT], "right": [KEY_D, KEY_RIGHT], "down": [KEY_S, KEY_DOWN], "up": [KEY_W, KEY_UP],
-		"jump": [KEY_SPACE, KEY_Z], "attack": [KEY_J, KEY_X], "dash": [KEY_K, KEY_SHIFT, KEY_C], "pause": [KEY_ESCAPE, KEY_P],
-	}
-	var pads := {"jump": JOY_BUTTON_A, "attack": JOY_BUTTON_X, "dash": JOY_BUTTON_RIGHT_SHOULDER, "pause": JOY_BUTTON_START}
+	var pads := {"jump": [JOY_BUTTON_A], "attack": [JOY_BUTTON_X], "dash": [JOY_BUTTON_RIGHT_SHOULDER, JOY_BUTTON_B], "pause": [JOY_BUTTON_START],
+		"confirm": [JOY_BUTTON_A], "back": [JOY_BUTTON_B]}
 	var axes := {"left": [JOY_AXIS_LEFT_X, -1.0], "right": [JOY_AXIS_LEFT_X, 1.0], "up": [JOY_AXIS_LEFT_Y, -1.0], "down": [JOY_AXIS_LEFT_Y, 1.0]}
 	var dpad := {"left": JOY_BUTTON_DPAD_LEFT, "right": JOY_BUTTON_DPAD_RIGHT, "up": JOY_BUTTON_DPAD_UP, "down": JOY_BUTTON_DPAD_DOWN}
-	for action in keys:
+	for action in DEFAULT_KEYS:
 		if not InputMap.has_action(action):
 			InputMap.add_action(action, 0.3)
-		for k in keys[action]:
-			var ev := InputEventKey.new()
-			ev.physical_keycode = k
-			InputMap.action_add_event(action, ev)
-		if pads.has(action):
+		InputMap.action_erase_events(action)
+		for k in keys_of(action):
+			if k < 0:
+				var mb := InputEventMouseButton.new()
+				mb.button_index = -k
+				InputMap.action_add_event(action, mb)
+			else:
+				var ev := InputEventKey.new()
+				ev.physical_keycode = k
+				InputMap.action_add_event(action, ev)
+		for b in pads.get(action, []):
 			var jb := InputEventJoypadButton.new()
-			jb.button_index = pads[action]
+			jb.button_index = b
 			InputMap.action_add_event(action, jb)
 		if dpad.has(action):
 			var db := InputEventJoypadButton.new()
@@ -1074,3 +1201,55 @@ func _setup_input() -> void:
 	lt.axis = JOY_AXIS_TRIGGER_RIGHT
 	lt.axis_value = 1.0
 	InputMap.action_add_event("dash", lt)
+	# keyboard-only Up, so pushing the stick up never jumps
+	if not InputMap.has_action("up_jump"):
+		InputMap.add_action("up_jump")
+	InputMap.action_erase_events("up_jump")
+	if opt_up_jump:
+		for k in keys_of("up"):
+			if k >= 0:
+				var uj := InputEventKey.new()
+				uj.physical_keycode = k
+				InputMap.action_add_event("up_jump", uj)
+
+
+## Menus: Enter, jump or attack confirm (not the Up alias for jump).
+func ok_pressed() -> bool:
+	return Input.is_action_just_pressed("confirm") or Input.is_action_just_pressed("jump") or Input.is_action_just_pressed("attack")
+
+
+## Catches the next key or mouse button for Options > Controls.
+func _input(ev: InputEvent) -> void:
+	if rebinding == "":
+		return
+	var code := 0
+	if ev is InputEventKey and ev.pressed and not ev.echo:
+		code = (ev as InputEventKey).physical_keycode
+		if code == 0:
+			code = (ev as InputEventKey).keycode
+	elif ev is InputEventMouseButton and ev.pressed:
+		code = -(ev as InputEventMouseButton).button_index
+	else:
+		return
+	get_viewport().set_input_as_handled()
+	var action := rebinding
+	rebinding = ""
+	if code != KEY_ESCAPE and code != KEY_ENTER and code != KEY_KP_ENTER:
+		for a in binds.keys():
+			if binds[a] == code and a != action:
+				binds.erase(a)
+		if code == DEFAULT_KEYS[action][0]:
+			binds.erase(action)
+		else:
+			binds[action] = code
+		_setup_input()
+		_save_meta()
+	# swallow the press so it does not also confirm the menu
+	Input.action_release("confirm")
+	call_deferred("open_controls")
+
+
+func _notification(what: int) -> void:
+	# alt-tabbing out pauses the run instead of letting it play on without you
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and not smoke and player != null and not player.dead and not hud.busy():
+		open_pause()
