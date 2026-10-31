@@ -16,6 +16,8 @@ var dash_cd := 0.0
 var stuck_t := 0.0
 var last_x := 0.0
 var wander := 1
+var last_hp := -1.0
+var hits_logged := 0
 const ACTIONS := ["left", "right", "up", "down", "jump", "attack", "dash", "skill"]
 const RUN_LIMIT := 900.0 ## game seconds before a run counts as stalled
 
@@ -53,6 +55,15 @@ func step(dt: float) -> void:
 	if p == null or p.dead:
 		return
 	run_t += dt
+	if last_hp >= 0 and p.hp < last_hp and hits_logged < 40:
+		hits_logged += 1
+		var near := []
+		for e in game.enemies:
+			if not e.dead and e.position.distance_to(p.position) < 260:
+				near.append("%s%s d(%d,%d) tele %.2f act %.2f %s" % [Enemy.Kind.keys()[e.kind] if e != game.boss else "BOSS", "*" + e.elite if e.elite != "" else "",
+					int(e.position.x - p.position.x), int(e.position.y - p.position.y), e.tele, e.act, e.mode])
+		print("balance: HIT at %.1fs hp %.0f ground %s dash %.2f dashcd %.2f | %s" % [run_t, p.hp, p.ground, p.dash, p.dash_cd, "; ".join(near)])
+	last_hp = p.hp
 	if run_t > RUN_LIMIT:
 		print("balance: run stalled at depth %d, ending it" % game.depth)
 		p.hp = 0
