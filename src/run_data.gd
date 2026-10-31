@@ -17,13 +17,13 @@ const RUNES := {
 	"GALE STEP": {"sig": "GALE", "rar": "common", "desc": "Dash cooldown -40%."},
 	"UPDRAFT": {"sig": "GALE", "rar": "rare", "desc": "Wall jumps blast nearby enemies upward."},
 	"EMBER DASH": {"sig": "EMBER", "rar": "rare", "desc": "Dashing through enemies deals triple damage."},
-	"BLOODLINE": {"sig": "EMBER", "rar": "common", "desc": "Every 20 kills, heal 1 heart."},
+	"BLOODLINE": {"sig": "EMBER", "rar": "common", "desc": "Every 20 kills, restore 20 HP."},
 	"HEAVY SHADOW": {"sig": "ECHO", "rar": "rare", "desc": "Slams are 60% wider and hit 70% harder."},
-	"VIGIL": {"sig": "ECHO", "rar": "common", "desc": "+1 max heart, and heal it now."},
-	"GLASS EDGE": {"sig": "EDGE", "rar": "cursed", "desc": "Damage +60%. Max hearts drop to 3."},
-	"HUNGER": {"sig": "EMBER", "rar": "cursed", "desc": "Gain 50% more wax. You can no longer heal."},
+	"VIGIL": {"sig": "ECHO", "rar": "common", "desc": "+20 max HP, and restore it now."},
+	"GLASS EDGE": {"sig": "EDGE", "rar": "cursed", "desc": "Damage +60%. Max HP drops to 60."},
+	"HUNGER": {"sig": "EMBER", "rar": "cursed", "desc": "Gain 50% more ash. You can no longer heal."},
 	"SECOND WIND": {"sig": "GALE", "rar": "rare", "desc": "Every kill resets your dash."},
-	"KINDLING": {"sig": "EMBER", "rar": "common", "desc": "Braziers burn twice as long and heal 1 heart when you relight them."},
+	"KINDLING": {"sig": "EMBER", "rar": "common", "desc": "Braziers burn twice as long and restore 20 HP when you relight them."},
 	"REQUIEM": {"sig": "ECHO", "rar": "common", "desc": "Kills burst into shade that hits everything close by."},
 	"TALLOW CROWN": {"sig": "EDGE", "rar": "cursed", "desc": "Bosses take 60% more damage. Every other enemy has 30% more health."},
 }
@@ -32,7 +32,7 @@ const RUNES := {
 const SETS := {
 	"EDGE": "All damage +15%.",
 	"GALE": "Dash cooldown -25%.",
-	"EMBER": "Every wax pickup is worth 1 more.",
+	"EMBER": "Every ash pickup is worth 1 more.",
 	"ECHO": "Slams are 25% wider.",
 }
 
@@ -43,13 +43,13 @@ const VIGILS := [
 	"Enemies come faster.",
 	"The hidden candle starts unlit.",
 	"Braziers burn for half as long.",
-	"One less heart.",
+	"20 less max HP.",
 ]
 
 const SHOP := [
-	{"id": "MEND", "name": "MEND", "desc": "Heal 2 hearts.", "cost": 60},
+	{"id": "MEND", "name": "MEND", "desc": "Restore 40 HP.", "cost": 60},
 	{"id": "TEMPER", "name": "TEMPER", "desc": "Your weapon deals +15% damage for the rest of the run.", "cost": 80},
-	{"id": "LEAVE", "name": "WALK ON", "desc": "Keep your wax.", "cost": 0},
+	{"id": "LEAVE", "name": "WALK ON", "desc": "Keep your ash.", "cost": 0},
 ]
 
 const RARITY_COL := {"common": Color("#f3ebe0"), "rare": Color("#f2b43a"), "cursed": Color("#e5383b")}

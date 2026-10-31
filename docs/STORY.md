@@ -1,6 +1,6 @@
 # Wickbearer: story bible
 
-The game was called Tenebrae until Oct 31, 2026. It was renamed after an exact-name game turned up on Steam. Tenebrae is still the rite at the heart of the story.
+The game was called Tenebrae until Oct 31, 2026. It was renamed after an exact-name game turned up on Steam. Tenebrae is still the rite at the core of the story.
 
 A short, dark arc that runs underneath the roguelike loop. One run is the whole story: four dungeons, fifteen candles, one throne at the bottom.
 

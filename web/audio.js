@@ -370,7 +370,7 @@ const AUDIO = (() => {
     const ch = CHM[M.ch], bpm = ch.bpm * (M.boss ? 1.18 : 1), bt = 60 / bpm;
     while (M.next < t + .25) { beat(M.next, ch, bt, M.mode === 'game', {}); M.next += bt; M.beat++; }
     if ((ambT -= .06) <= 0) { ambT = R(2, 6); if (M.mode === 'game') ambEvent(t + .05); }
-    // heartbeat at one heart
+    // heartbeat at the last 20 HP
     if (M.mode === 'game' && M.hp === 1 && (hbT -= .06) <= 0) { hbT = .95; tone('sine', 54, t + .05, .16, { g: .28 }); tone('sine', 50, t + .25, .16, { g: .2 }); }
   }
   // stems (offline renders for Godot): base = drone, choir, bells, plucks; drums = the fight layer; boss = everything at boss tempo
@@ -459,11 +459,11 @@ const AUDIO = (() => {
       if (p.ground && Math.abs(p.vx) > 70 && !p.dash) { const ph = Math.floor((p.ph || 0) / Math.PI); if (ph !== stepPh) { stepPh = ph; play('step'); } }
       const sl = p.slideT > 0 && !p.ground ? .12 : 0; amb.slide.gain.setTargetAtTime(mute ? 0 : sl, now(), .04);
     } else amb.slide.gain.setTargetAtTime(0, now(), .04);
-    // ---- numbers: hits, hearts, level-ups
+    // ---- numbers: hits, heals, level-ups
     let hits = 0;
     for (const n of fresh(st.N)) {
       if (typeof n.v === 'number') { if (hits++ < 3) play('hit', n.crit, n.x, n.y, hits > 1); }
-      else if (/♥/.test(n.v) && /^\+/.test(n.v)) play('heal');
+      else if (/HP$/.test(n.v) && /^\+/.test(n.v)) play('heal');
     }
     if (st.hp < P.hp && st.hp > 0) play('hurt');
     if (st.hidden === false && P.hidden === true && st.hp > 0) play('revive');

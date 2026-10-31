@@ -1,6 +1,6 @@
 class_name Hud
 extends CanvasLayer
-## Hearts, the candle hearse (depth meter), depth title and banners.
+## Health bar, the candle hearse (depth meter), depth title and banners.
 ## The hearse follows the Tenebrae service (the rite behind Wickbearer): 15 candles on a triangle go out
 ## one per depth, alternating from the two ends toward the top. The small
 ## crimson candle under it is the hidden candle, the one revive per run.
@@ -13,7 +13,7 @@ var banner_t := 0.0
 var font: Font
 # an open choice: {title, sub, opts: [{name, desc, tag, col}], pick, cb, t}
 var menu = null
-# the death screen: {depth, time, kills, bosses, wax, kept, bank, unlocked, t}
+# the death screen: {depth, time, kills, bosses, wax (ash), kept, bank, unlocked, t}
 var summary = null
 # a cutscene: {cards, i, t, cb}
 var scene = null
@@ -151,7 +151,7 @@ func _paint() -> void:
 	var p := game.player
 	if p == null:
 		return
-	# health bar: one segment per heart, the gold trail shows recent damage
+	# health bar: the gold trail shows recent damage. HP shows as 20 per internal hit point
 	var mh := int(p.max_hp)
 	var bw := 34.0 * mh
 	var bx := vp.x - 30 - bw
@@ -160,9 +160,7 @@ func _paint() -> void:
 	canvas.draw_rect(Rect2(bx - 2, 20, bw + 4, 18), Color(0, 0, 0, 0.75))
 	canvas.draw_rect(Rect2(bx, 22, bw * hp_show, 14), Color(0.95, 0.7, 0.23, 0.55))
 	canvas.draw_rect(Rect2(bx, 22, bw * hk, 14), Color("#e5383b"))
-	for i in range(1, mh):
-		canvas.draw_rect(Rect2(bx + i * 34 - 1, 22, 2, 14), Color(0, 0, 0, 0.8))
-	_text("%d / %d" % [int(p.hp), mh], Vector2(bx - 64, 35), 13, Color("#f3ebe0"))
+	_text("%d / %d HP" % [int(p.hp) * 20, mh * 20], Vector2(bx - 104, 35), 13, Color("#f3ebe0"))
 	# depth title
 	var title := "DEPTH %s" % Game.roman(game.depth)
 	_text(title, Vector2(vp.x / 2, 52), 34, Color("#e5383b") if game.depth >= 7 else Color("#f3ebe0"), true)
@@ -172,8 +170,8 @@ func _paint() -> void:
 	var ch: Dictionary = Story.CHAPTERS[Story.chapter_of(game.depth)]
 	_text(ch.name, Vector2(vp.x / 2, 88), 12, ch.col, true)
 	_hearse(Vector2(vp.x - 200, 110))
-	# wax and level
-	_text("%d WAX" % game.run_wax, Vector2(vp.x - 200, 160), 14, Color("#3fd6c4"))
+	# ash and level
+	_text("%d ASH" % game.run_wax, Vector2(vp.x - 200, 160), 14, Color("#3fd6c4"))
 	_text("LV %d" % game.lvl, Vector2(vp.x - 200, 180), 14, Color(0.6, 0.57, 0.54))
 	canvas.draw_rect(Rect2(0, vp.y - 6, vp.x, 6), Color(0, 0, 0, 0.7))
 	canvas.draw_rect(Rect2(0, vp.y - 6, vp.x * game.xp / game.xp_need(), 6), Color("#3fd6c4"))
@@ -226,7 +224,7 @@ func _paint_title(vp: Vector2) -> void:
 		var v := game.vigil
 		_text("<   VIGIL %s   >" % (Game.roman(v) if v > 0 else "0"), Vector2(mid.x, mid.y + 50), 22, Color("#e5383b") if v > 0 else Color("#f3ebe0"), true)
 		_text(RunData.VIGILS[v] if v == 0 else "Every Vigil up to %s:  %s" % [Game.roman(v), RunData.VIGILS[v]], Vector2(mid.x, mid.y + 76), 14, Color(0.7, 0.66, 0.62), true)
-	var stats := "BANKED WAX %d   ·   DEEPEST %s   ·   DAWNS %d" % [game.bank, Game.roman(maxi(1, game.best_depth)), game.wins]
+	var stats := "BANKED ASH %d   ·   DEEPEST %s   ·   DAWNS %d" % [game.bank, Game.roman(maxi(1, game.best_depth)), game.wins]
 	_text(stats + "   ·   ACHIEVEMENTS %d / %d" % [game.achieved.size(), Achievements.LIST.size()], Vector2(mid.x, vp.y - 110), 13, Color(0.6, 0.57, 0.54), true)
 	var blink := 0.5 + 0.5 * sin(t * 4)
 	_text("PRESS SPACE OR J TO DESCEND", Vector2(mid.x, vp.y - 70), 16, Color(0.95, 0.92, 0.88, 0.4 + 0.6 * blink), true)
@@ -336,8 +334,8 @@ func _paint_summary(vp: Vector2) -> void:
 		var x := vp.x / 2 + (i - 1.5) * 160
 		_text(cols[i][0], Vector2(x, 190), 13, Color(0.6, 0.57, 0.54), true)
 		_text(cols[i][1], Vector2(x, 236), 40, Color("#f3ebe0"), true)
-	_text("WAX COLLECTED %d   ·   %s%s +%d" % [s.wax, "ALL KEPT" if s.won else "40% KEPT", " + BOSS BONUS" if s.bosses > 0 else "", s.kept], Vector2(vp.x / 2, 300), 16, Color("#3fd6c4"), true)
-	_text("BANKED WAX %d" % s.bank, Vector2(vp.x / 2, 330), 16, Color("#f3ebe0"), true)
+	_text("ASH COLLECTED %d   ·   %s%s +%d" % [s.wax, "ALL KEPT" if s.won else "40% KEPT", " + BOSS BONUS" if s.bosses > 0 else "", s.kept], Vector2(vp.x / 2, 300), 16, Color("#3fd6c4"), true)
+	_text("BANKED ASH %d" % s.bank, Vector2(vp.x / 2, 330), 16, Color("#f3ebe0"), true)
 	if s.unlocked != "":
 		_text("UNLOCKED · %s" % s.unlocked, Vector2(vp.x / 2, 380), 30, Color("#f2b43a"), true)
 	if s.t > 1.2:

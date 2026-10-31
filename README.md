@@ -28,23 +28,23 @@ Open the folder in **Godot 4.3** (or newer 4.x) and press F5. The whole scene is
 - `src/world.gd` loads an ASCII arena from `maps/` and does tile collision (solid rock, one-way bridges).
 - `src/player.gd` is the controller. Physics runs at 120 Hz with coyote time, a jump buffer, variable jump height, double jump, wall slide and wall jump, dash, drop-through, slam and the 3-step katana combo. Every tuning value is an `@export`, so it can be changed in the inspector while the game runs.
 - `src/rig.gd` is the procedural stick rig ported from the web pitch. Every joint is driven by a damped spring, so pose changes get real in-betweens.
-- `src/enemy.gd` has the four regular enemies: the Hollow (grunt), Gloomwing (flyer that dives, from depth II), Hexer (lobs violet hexes in arcs, from depth III) and Brute (heavy, telegraphed club swing, from depth V). Each lower dungeon adds its own: the Drowned (the Well) crouch and pounce, the Forged (the Bladeworks) throw spinning blades along their floor, and Snuffers (the Throne) blink next to you, slash, and shrink your light while they're near. From depth III some come as gold-ringed elites with 2.2x health and triple wax: Swift (faster), Shielded (half damage from the front, so hit them from behind or slam) and Volatile (bursts when it dies). Enemies come out of the portals nearest you, and their health rises 30% per depth.
+- `src/enemy.gd` has the four regular enemies: the Hollow (grunt), Gloomwing (flyer that dives, from depth II), Hexer (lobs violet hexes in arcs, from depth III) and Brute (heavy, telegraphed club swing, from depth V). Each lower dungeon adds its own: the Drowned (the Well) crouch and pounce, the Forged (the Bladeworks) throw spinning blades along their floor, and Snuffers (the Throne) blink next to you, slash, and shrink your light while they're near. From depth III some come as gold-ringed elites with 2.2x health and triple ash: Swift (faster), Shielded (half damage from the front, so hit them from behind or slam) and Volatile (bursts when it dies). Enemies come out of the portals nearest you, and their health rises 30% per depth.
 - `src/boss.gd` holds the four bosses on one body. The Chain Warden smashes the floor and sends shockwaves both ways. The Hollow King leaps and lands in a crash. The Ashen Jarl's forge-waves run faster and he starts leaping when hurt. Saint Umber leaps, casts hexes on every landing and wears a crown of candles.
 - `src/story.gd` is the story from `docs/STORY.md` as data: the chapters, the prologue, the boss reveals, the chapter intros and endings, and the finale.
-- `src/hud.gd` draws the hearts, the depth title, the candle hearse, the cutscene cards (letterbox, focus lines, name plates, title cards), the death band and the summaries.
+- `src/hud.gd` draws the health bar, the depth title, the candle hearse, the cutscene cards (letterbox, focus lines, name plates, title cards), the death band and the summaries.
 - `src/fx.gd` holds grey-box particles, rings and the double-jump wing burst.
 - `src/debug_overlay.gd` shows the player state, timers and FPS.
 
 ## The run
 
-- **Weapon draw:** each run starts with a pick of 1 of 2 weapons (katana, greatsword, spear, twin daggers). The chain sickle unlocks once you have banked 400 wax in total.
-- **Wax:** enemies drop wax that flies to you. It's your run currency and your XP.
-- **Rune drafts:** every level-up, pick 1 of 3 runes. Runes change your moves (Updraft, Ember Dash, Heavy Shadow, Second Wind, Requiem and more), and three are cursed. Two runes with the same sigil complete a set: EDGE +15% damage, GALE faster dashes, EMBER more wax per pickup, ECHO wider slams.
-- **Title screen:** shows your banked wax, deepest depth and dawns (wins), and the Vigil picker once you've won.
-- **Vigils:** each win unlocks the next of five harder levels, and each level keeps the ones below it: more enemy health, faster spawns, no hidden candle, shorter braziers, one less heart.
+- **Weapon draw:** each run starts with a pick of 1 of 2 weapons (katana, greatsword, spear, twin daggers). The chain sickle unlocks once you have banked 400 ash in total.
+- **Ash:** enemies drop ash that flies to you. It's your run currency and your XP.
+- **Rune drafts:** every level-up, pick 1 of 3 runes. Runes change your moves (Updraft, Ember Dash, Heavy Shadow, Second Wind, Requiem and more), and three are cursed. Two runes with the same sigil complete a set: EDGE +15% damage, GALE faster dashes, EMBER more ash per pickup, ECHO wider slams.
+- **Title screen:** shows your banked ash, deepest depth and dawns (wins), and the Vigil picker once you've won.
+- **Vigils:** each win unlocks the next of five harder levels, and each level keeps the ones below it: more enemy health, faster spawns, no hidden candle, shorter braziers, 20 less max HP.
 - **Shade merchant:** opens after each boss. Mend, Temper, or walk on.
-- **Death:** souls-like. The world slows and drains, the Wick crumbles into embers, and **EXTINGUISHED** fades in. 40% of your wax (plus 50 per boss) is banked to `user://wickbearer.cfg`, then a new run.
-- **Victory:** beat Saint Umber at depth XVI to see the finale and **THE DAWN RETURNS**. A won run keeps all its wax.
+- **Death:** souls-like. The world slows and drains, the Wick crumbles into embers, and **EXTINGUISHED** fades in. 40% of your ash (plus 50 per boss) is banked to `user://wickbearer.cfg`, then a new run.
+- **Victory:** beat Saint Umber at depth XVI to see the finale and **THE DAWN RETURNS**. A won run keeps all its ash.
 
 ## Playtest numbers
 
@@ -87,7 +87,7 @@ The name comes from an old church service where 15 candles on a triangular stand
 
 - Maps are read with `FileAccess` from `res://maps`. For an exported build, add `maps/*.txt` to the export preset's non-resource include filter.
 - Physics interpolation is on (Godot 4.3), so movement stays smooth on 144 Hz and faster screens. Anything that teleports calls `reset_physics_interpolation()`.
-- The pause menu has Options, saved to `user://wickbearer.cfg`: screen shake (100, 50, 0%), flashes (off is photosensitivity mode), hit-stop, fullscreen, and two assists that never block achievements: game speed (100, 85, 70%) and +2 starting hearts.
+- The pause menu has Options, saved to `user://wickbearer.cfg`: screen shake (100, 50, 0%), flashes (off is photosensitivity mode), hit-stop, fullscreen, and two assists that never block achievements: game speed (100, 85, 70%) and +40 starting HP.
 
 ## Playable browser build
 

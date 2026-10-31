@@ -53,7 +53,7 @@ rep("""    const o = st.ov; o.t += rdt;
 """)
 rep("decided = t >= o.at;", "decided = t >= o.at, live_ = !decided;")
 rep("const hov = decided ? o.pick : Math.floor(t / .3) % n;", "const hov = decided ? o.pick : Math.max(0, o.pick);")
-rep("txt(o.kind === 'draft' ? 'A  DRAFT     Y  REROLL ◆ 40     B  SKIP FOR WAX' : o.kind === 'shop' ? 'A  BUY     B  LEAVE' : 'A  EQUIP'",
+rep("txt(o.kind === 'draft' ? 'A  DRAFT     Y  REROLL ◆ 40     B  SKIP FOR ASH' : o.kind === 'shop' ? 'A  BUY     B  LEAVE' : 'A  EQUIP'",
     "txt(o.kind === 'shop' ? '← →  CHOOSE     J / SPACE  BUY     SHIFT  LEAVE' : '← →  CHOOSE     J / SPACE  CONFIRM'")
 rep("txt(`NEW RUN IN ${Math.max(1, Math.ceil(o.dur - t))} · NEW SEED · NEW DRAWS`", "txt(t > 2.5 ? 'PRESS J OR SPACE TO RELIGHT THE CANDLES · NEW SEED · NEW DRAWS' : 'LIGHTS OUT'")
 

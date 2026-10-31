@@ -70,7 +70,7 @@ var opt_fullscreen := false
 var opt_flashes := true ## false is photosensitivity mode: no full-screen flashes
 var opt_hitstop := true
 var opt_speed := 1.0 ## game speed: 1, 0.85 or 0.7
-var opt_hearts := false ## assist: +2 hearts; achievements still count
+var opt_hearts := false ## assist: +40 HP; achievements still count
 
 # --smoke (used by CI): a bot mashes inputs, depths fly by, and the run is forced
 # through the boss, the hidden candle and a death, then the game quits.
@@ -307,7 +307,7 @@ func open_pause() -> void:
 	var opts := [
 		{"id": "resume", "name": "RESUME", "desc": "Back into the dark.", "tag": ""},
 		{"id": "options", "name": "OPTIONS", "desc": "Screen shake and fullscreen.", "tag": ""},
-		{"id": "restart", "name": "RESTART", "desc": "Abandon this run. Wax you carry is lost.", "tag": ""},
+		{"id": "restart", "name": "RESTART", "desc": "Abandon this run. Ash you carry is lost.", "tag": ""},
 		{"id": "title", "name": "TITLE", "desc": "Abandon this run and return to the title.", "tag": ""},
 	]
 	hud.open_choice("PAUSED", "DEPTH %s  ·  %s" % [roman(depth), Story.CHAPTERS[chapter()].name], opts, _pause_pick.bind(opts))
@@ -333,7 +333,7 @@ func open_options() -> void:
 		{"id": "flash", "name": "FLASHES %s" % ("ON" if opt_flashes else "OFF"), "desc": "Off is photosensitivity mode: no full-screen flashes.", "tag": "OPTION"},
 		{"id": "stop", "name": "HIT-STOP %s" % ("ON" if opt_hitstop else "OFF"), "desc": "The tiny freeze when a hit lands.", "tag": "OPTION"},
 		{"id": "speed", "name": "SPEED %d%%" % roundi(opt_speed * 100), "desc": "Assist: slow the whole game to 85 or 70%. Achievements still count.", "tag": "ASSIST"},
-		{"id": "hearts", "name": "+2 HEARTS %s" % ("ON" if opt_hearts else "OFF"), "desc": "Assist: start each run with two extra hearts. Applies next run.", "tag": "ASSIST"},
+		{"id": "hearts", "name": "+40 HP %s" % ("ON" if opt_hearts else "OFF"), "desc": "Assist: start each run with 40 extra HP. Applies next run.", "tag": "ASSIST"},
 		{"id": "full", "name": "FULLSCREEN %s" % ("ON" if opt_fullscreen else "OFF"), "desc": "Fill the screen, or play in a window.", "tag": "OPTION"},
 		{"id": "back", "name": "BACK", "desc": "Return to the pause menu.", "tag": ""},
 	]
@@ -546,14 +546,14 @@ func _open_shop() -> void:
 	var opts := []
 	for it in RunData.SHOP:
 		var afford: bool = run_wax >= it.cost
-		opts.append({"id": it.id, "name": it.name, "desc": it.desc, "tag": ("%d WAX" % it.cost) if it.cost > 0 else "FREE", "col": Color("#f3ebe0") if afford else Color(0.4, 0.37, 0.35), "cost": it.cost})
-	hud.open_choice("SHADE MERCHANT", "YOU HAVE %d WAX · SPEND IT OR LOSE 60%% OF IT ON DEATH" % run_wax, opts, func(i): _buy(opts[i]))
+		opts.append({"id": it.id, "name": it.name, "desc": it.desc, "tag": ("%d ASH" % it.cost) if it.cost > 0 else "FREE", "col": Color("#f3ebe0") if afford else Color(0.4, 0.37, 0.35), "cost": it.cost})
+	hud.open_choice("SHADE MERCHANT", "YOU HAVE %d ASH · SPEND IT OR LOSE 60%% OF IT ON DEATH" % run_wax, opts, func(i): _buy(opts[i]))
 
 
 func _buy(o: Dictionary) -> void:
 	story_hold = false
 	if run_wax < o.cost:
-		hud.show_banner("NOT ENOUGH WAX", "YOU WALK ON", 1.2)
+		hud.show_banner("NOT ENOUGH ASH", "YOU WALK ON", 1.2)
 		return
 	run_wax -= o.cost
 	if o.id == "MEND":
@@ -920,7 +920,7 @@ func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 					hit_enemy(o, 1, Vector2(signf(o.position.x - e.position.x) * 260, -260))
 		if has_rune("BLOODLINE") and kills % 20 == 0:
 			heal(1)
-			hud.show_banner("BLOODLINE", "+1 HEART", 1.0)
+			hud.show_banner("BLOODLINE", "+20 HP", 1.0)
 		if e == boss:
 			bosses += 1
 			var bi: int = (e as Boss).idx
