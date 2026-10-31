@@ -24,6 +24,7 @@ jobs:
             head -c 60000 unique.txt | paste -sd'|' | fold -w 3500 | while read -r chunk; do echo "::error::$chunk"; done
             echo "Godot reported script errors"; exit 1
           fi
+          echo "::notice::$(grep 'smoke test:' smoke.log | paste -sd'|')"
           grep -q "smoke test: done" smoke.log || { echo "::error::smoke test did not finish: $(tail -c 2000 smoke.log | paste -sd'|')"; exit 1; }
           echo "No script errors"
 
