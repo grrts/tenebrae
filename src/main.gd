@@ -54,6 +54,7 @@ var smoke := false
 var smoke_t := 0.0
 var smoke_held := ""
 var smoke_map := 0
+var smoke_boss_t := 0.0
 
 var map_i := 1
 var hitstop := 0.0
@@ -120,7 +121,14 @@ func _smoke(dt: float) -> void:
 		smoke_held = ["left", "right", ""][randi() % 3]
 	if randf() < dt * 6:
 		Input.action_press(actions[2 + randi() % 4])
-	if smoke_t < 14 and player.hp < 2:
+	# bosses get 3 s to show their pattern, then the bot kills them so both bosses and the shop run
+	if boss != null:
+		smoke_boss_t += dt
+		if smoke_boss_t > 3.0:
+			smoke_boss_t = 0.0
+			print("smoke test: killing %s" % boss.boss_name)
+			hit_enemy(boss, 99999, Vector2.ZERO)
+		if smoke_t < 14 and player.hp < 2:
 		player.hp = player.max_hp
 	if absf(smoke_t - 16) < dt and not player.dead:
 		print("smoke test: forcing hidden candle, then death")
@@ -419,7 +427,7 @@ func next_depth() -> void:
 func _spawn_boss() -> void:
 	boss = Boss.new()
 	boss.game = self
-	boss.setup_boss(hp_mul())
+	boss.setup_boss(hp_mul(), bosses % 2 == 1)
 	var x := clampf(player.position.x + (420.0 if player.position.x < world.size.x / 2 else -420.0), 120, world.size.x - 120)
 	var y := player.position.y - 300
 	if world.is_solid(world.cell(x), world.cell(y)) or world.is_solid(world.cell(x), world.cell(y - 100)):
@@ -430,7 +438,7 @@ func _spawn_boss() -> void:
 	enemies.append(boss)
 	shake(0.7, 18)
 	hitstop = 0.15
-	hud.show_banner("DEPTH %s · STREPITUS" % roman(depth), "THE CHAIN WARDEN DESCENDS", 2.4)
+	hud.show_banner("DEPTH %s · STREPITUS" % roman(depth), "%s DESCENDS" % boss.boss_name, 2.4)
 
 
 func hp_mul() -> float:
@@ -542,6 +550,8 @@ func _spawn() -> void:
 
 
 func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
+	if e.dead:
+		return
 	e.hp -= dmg * damage_mul()
 	e.knock(kb)
 	hitstop = maxf(hitstop, 0.05)
@@ -563,7 +573,7 @@ func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 			hitstop = 0.25
 			shake(0.5, 14)
 			fx.ring(e.position, 320, Color("#f2b43a"))
-			hud.show_banner("WARDEN SLAIN", "THE CLIMB GOES ON", 2.4)
+			hud.show_banner("%s SLAIN" % (e as Boss).boss_name.replace("THE ", ""), "THE CLIMB GOES ON", 2.4)
 
 
 func on_player_dead() -> void:

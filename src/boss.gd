@@ -4,6 +4,10 @@ extends Enemy
 ## with a crash that shakes the whole arena. Pattern: walk toward you, wind up,
 ## smash the floor, which sends a shockwave running both ways along it. Jump
 ## the wave, punish the recovery. Below half health the wind-up gets shorter.
+##
+## The Hollow King (every second boss) uses the same body, bigger: instead of a
+## standing smash he leaps at you and lands in a crash that sends waves both
+## ways, and below half health he also casts a fan of hexes from the landing.
 
 @export var walk_speed := 75.0
 @export var quake_speed := 560.0
@@ -12,6 +16,8 @@ var state := "fall"
 var t := 1.6
 var landed := false
 var quakes: Array = []
+var king := false
+var boss_name := "THE CHAIN WARDEN"
 
 
 func _ready() -> void:
@@ -19,9 +25,14 @@ func _ready() -> void:
 	h = 120
 
 
-func setup_boss(hp_mul: float) -> void:
-	max_hp = 20 * hp_mul
+func setup_boss(hp_mul: float, is_king := false) -> void:
+	king = is_king
+	boss_name = "THE HOLLOW KING" if king else "THE CHAIN WARDEN"
+	max_hp = (26.0 if king else 20.0) * hp_mul
 	hp = max_hp
+	if king:
+		w = 52
+		h = 140
 
 
 func _physics_process(dt: float) -> void:
@@ -48,7 +59,12 @@ func _physics_process(dt: float) -> void:
 				t = 0.5 if enraged else 0.75
 		"wind":
 			vel.x = move_toward(vel.x, 0, 1600 * dt)
-			if t <= 0:
+			if t <= 0 and king:
+				# leap at the player; the landing is the smash
+				state = "leap"
+				vel = Vector2(clampf(dx * 1.4, -520, 520), -900)
+				ground = false
+			elif t <= 0:
 				state = "smash"
 				t = 0.5
 				var sx := position.x + facing * 60
@@ -56,6 +72,20 @@ func _physics_process(dt: float) -> void:
 				game.fx.ring(Vector2(sx, position.y), 300, Color("#e5383b"))
 				quakes.append({"x": sx, "y": position.y, "dir": -1, "t": 0.0})
 				quakes.append({"x": sx, "y": position.y, "dir": 1, "t": 0.0})
+		"leap":
+			if ground and vel.y >= 0:
+				state = "smash"
+				t = 0.6
+				game.shake(0.45, 16)
+				game.fx.ring(position, 320, Color("#e5383b"))
+				quakes.append({"x": position.x, "y": position.y, "dir": -1, "t": 0.0})
+				quakes.append({"x": position.x, "y": position.y, "dir": 1, "t": 0.0})
+				if absf(dx) < 110 and absf(p.position.y - position.y) < 60:
+					p.take_hit(position.x)
+				if enraged:
+					for k in 5:
+						var tgt := p.position + Vector2((k - 2) * 90, -30)
+						game.fire_hex(position + Vector2(0, -120), tgt)
 		"smash":
 			if t <= 0:
 				state = "walk"
@@ -106,7 +136,10 @@ func _draw() -> void:
 		_:
 			pose = Rig.run_pose(position.x * 0.03)
 			pose.lean = 0.2
-	var J := Rig.build(pose, Vector2(0, -80), facing, 1.3)
+	if state == "leap":
+		pose = {"lean": 0.3, "tilt": -0.1, "legs": [[0.9, -1.8], [1.2, -1.9]], "arms": [[-2.2, 0.4], [-2.6, 0.2]]}
+	var sc := 1.55 if king else 1.3
+	var J := Rig.build(pose, Vector2(0, -80 * sc / 1.3), facing, sc)
 	Rig.paint(self, J, body, Color("#1d1a20"), Color(0.9, 0.22, 0.23, 0.7), Color("#e5383b"))
 	# the warden's chain: a heavy weight on a swinging line
 	var hand: Vector2 = J.armF.e

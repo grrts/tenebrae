@@ -33,6 +33,7 @@ extends Actor
 @export var slam_radius := 160.0
 @export var damage := 1.0
 @export var blade_len := 58.0
+var hit_count := 0
 
 var game: Game
 
@@ -257,7 +258,15 @@ func _attack_hits() -> void:
 			continue
 		if box.intersects(e.hurtbox()):
 			atk.hit.append(e)
+			hit_count += 1
 			var up := -420.0 if atk.step == 2 else -160.0
+			# weapon quirks: dagger crits every third hit, the sickle hooks enemies in on the finisher
+			if game.weapon == "daggers" and hit_count % 3 == 0:
+				game.hit_enemy(e, damage, Vector2.ZERO)
+				game.fx.ring(e.position + Vector2(0, -28), 40, Color("#f2b43a"))
+			if game.weapon == "sickle" and atk.step == 2:
+				game.hit_enemy(e, damage * 1.5, Vector2(-facing * 420, -200))
+				continue
 			game.hit_enemy(e, damage * (1.5 if atk.step == 2 else 1.0) * (2.0 if atk.step == 2 and game.has_rune("FINISHER") else 1.0), Vector2(facing * (380 if atk.step == 2 else 220), up))
 
 
