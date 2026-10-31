@@ -105,6 +105,7 @@ func say(text: String) -> void:
 	if s != null:
 		voice.stream = s
 		voice.play()
+		played += 1
 
 
 func _set_chapter(ch: int) -> void:
@@ -366,3 +367,9 @@ func _process(dt: float) -> void:
 func _kind(e: Node) -> String:
 	# Enemy.Kind { HOLLOW, GLOOMWING, BRUTE, HEXER, DROWNED, FORGED, SNUFFER }
 	return ["sh", "bat", "br", "sp", "dr", "fg", "sn"][clampi(int(e.get("kind")), 0, 6)]
+
+
+func _exit_tree() -> void:
+	# CI reads this line to check that the sound files load and the watcher fires
+	if game != null and is_instance_valid(game) and game.get("smoke"):
+		print("smoke test: audio played %d sounds" % played)
