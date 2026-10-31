@@ -37,9 +37,10 @@ Open the folder in **Godot 4.3** (or newer 4.x) and press F5. The whole scene is
 
 ## The run
 
-- **Weapon draw:** each run starts with a pick of 1 of 2 weapons (katana, greatsword, spear, twin daggers). The chain sickle unlocks once you have banked 400 ash in total.
+- **Weapon draw:** each run starts with a pick of 1 of 2 weapons (katana, greatsword, spear, twin daggers). The chain sickle is bought in the Reliquary.
 - **Ash:** enemies drop ash that flies to you. It's your run currency and your XP.
 - **Rune drafts:** every level-up, pick 1 of 3 runes. Runes change your moves (Updraft, Ember Dash, Heavy Shadow, Second Wind, Requiem and more), and three are cursed. Two runes with the same sigil complete a set: EDGE +15% damage, GALE faster dashes, EMBER more ash per pickup, ECHO wider slams.
+- **The Reliquary:** press Shift, K or RB on the title screen to spend banked ash on permanent unlocks: the chain sickle, four runes for the draft pool, and four starting perks (Second Draw, Ashen Skin, Spare Rune, Ember Flask). All of it lives in `RunData.RELICS`.
 - **Title screen:** shows your banked ash, deepest depth and dawns (wins), and the Vigil picker once you've won.
 - **Vigils:** each win unlocks the next of five harder levels, and each level keeps the ones below it: more enemy health, faster spawns, no hidden candle, shorter braziers, 20 less max HP.
 - **Shade merchant:** opens after each boss. Mend, Temper, or walk on.

@@ -15,5 +15,6 @@ const LIST := [
 	{"id": "FULL_SET", "name": "Sigil Bound", "desc": "Complete a rune set."},
 	{"id": "CURSED", "name": "Bargain in the Dark", "desc": "Take a cursed rune."},
 	{"id": "LAMPLIGHTER", "name": "Lamplighter", "desc": "Relight 10 braziers in one run."},
+	{"id": "RELIQUARY", "name": "Keeper of Relics", "desc": "Buy everything in the Reliquary."},
 	{"id": "ELITE_HUNTER", "name": "Gold in the Ash", "desc": "Defeat 25 elite enemies."},
 ]

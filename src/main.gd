@@ -58,6 +58,7 @@ var wins := 0
 var sets_done: Array[String] = []
 var unlocked_vigil := 0
 var achieved: Array = []
+var relics: Array = []
 var elite_kills := 0
 var run_braziers := 0
 var boss_untouched := false
@@ -201,6 +202,12 @@ func _smoke(dt: float) -> void:
 				m.cb.call(0)
 				print("smoke test: options ok, shake %.1f" % opt_shake)
 				opt_shake = 1.0
+				bank += 2000
+				var bought := 0
+				for i in RunData.RELICS.size():
+					if buy_relic(i):
+						bought += 1
+				print("smoke test: reliquary bought %d relics" % bought)
 				hud.open_title(_smoke_title_ok)
 		3:
 			# every arena loads and runs briefly
@@ -299,6 +306,8 @@ func _begin() -> void:
 		player.max_hp -= 1
 	if opt_hearts:
 		player.max_hp += 2
+	if "ashen_skin" in relics:
+		player.max_hp += 1
 	player.hp = player.max_hp
 	_play_once("prologue", Story.PROLOGUE, _weapon_draw)
 
@@ -412,10 +421,10 @@ func _play_once(id: String, cards: Array, cb: Callable) -> void:
 
 
 func _weapon_draw() -> void:
-	var pool := RunData.WEAPONS.keys().filter(func(k): return not RunData.WEAPONS[k].get("locked", false) or earned >= 400)
+	var pool := RunData.WEAPONS.keys().filter(func(k): return not RunData.WEAPONS[k].get("locked", false) or k in relics)
 	pool.shuffle()
 	var opts := []
-	for k in pool.slice(0, 2):
+	for k in pool.slice(0, 3 if "second_draw" in relics else 2):
 		var wd: Dictionary = RunData.WEAPONS[k]
 		opts.append({"id": k, "name": wd.name, "desc": wd.desc, "tag": "WEAPON", "col": Color("#f3ebe0")})
 	hud.open_choice("CHOOSE YOUR WEAPON", "A NEW DRAW EVERY RUN", opts, func(i): _pick_weapon(opts[i]))
@@ -424,6 +433,8 @@ func _weapon_draw() -> void:
 func _pick_weapon(o: Dictionary) -> void:
 	_equip(o.id)
 	hud.show_banner("DEPTH I", "%s · %s" % [o.name, Story.CHAPTERS[0].name], 1.8)
+	if "spare_rune" in relics:
+		_open_draft()
 
 
 func _equip(id: String) -> void:
@@ -467,6 +478,19 @@ func _log_run() -> void:
 		print("smoke test: run logged, won %s, depth %d" % [won, depth])
 
 
+## Buys relic i from the Reliquary if the bank allows. Returns true on a purchase.
+func buy_relic(i: int) -> bool:
+	var r: Dictionary = RunData.RELICS[i]
+	if r.id in relics or bank < r.cost:
+		return false
+	bank -= r.cost
+	relics.append(r.id)
+	_save_meta()
+	if relics.size() >= RunData.RELICS.size():
+		unlock("RELIQUARY")
+	return true
+
+
 func on_player_hit() -> void:
 	boss_untouched = false
 
@@ -494,7 +518,7 @@ func xp_need() -> int:
 
 
 func _open_draft() -> void:
-	var pool := RunData.RUNES.keys().filter(func(k): return not (k in runes))
+	var pool := RunData.RUNES.keys().filter(func(k): return not (k in runes) and (not RunData.RUNES[k].get("locked", false) or k in relics))
 	pool.shuffle()
 	var opts := []
 	for k in pool.slice(0, 3):
@@ -572,6 +596,10 @@ func _load_meta() -> void:
 		best_depth = cfg.get_value("meta", "best_depth", 0)
 		wins = cfg.get_value("meta", "wins", 0)
 		achieved = cfg.get_value("achievements", "unlocked", [])
+		relics = cfg.get_value("meta", "relics", [])
+		if earned >= 400 and not "sickle" in relics:
+			# saves from before the Reliquary unlocked the sickle at 400 earned
+			relics.append("sickle")
 		elite_kills = cfg.get_value("achievements", "elite_kills", 0)
 		var sh = cfg.get_value("options", "shake", 1.0)
 		opt_shake = (1.0 if sh else 0.0) if typeof(sh) == TYPE_BOOL else float(sh)
@@ -591,6 +619,7 @@ func _save_meta() -> void:
 	cfg.set_value("meta", "best_depth", best_depth)
 	cfg.set_value("meta", "wins", wins)
 	cfg.set_value("achievements", "unlocked", achieved)
+	cfg.set_value("meta", "relics", relics)
 	cfg.set_value("achievements", "elite_kills", elite_kills)
 	cfg.set_value("options", "shake", opt_shake)
 	cfg.set_value("options", "fullscreen", opt_fullscreen)
@@ -725,6 +754,8 @@ func _spawn_boss() -> void:
 
 ## After a boss: its last words, then the merchant. After Saint Umber: the finale and the dawn.
 func _after_boss(ch: int) -> void:
+	if "ember_flask" in relics:
+		heal(1)
 	if ch == 3:
 		hud.play(Story.ENDINGS[3], _victory)
 	else:
@@ -962,7 +993,10 @@ func _end_run() -> void:
 			vigil_max += 1
 			unlocked_vigil = vigil_max
 	_save_meta()
-	var unlocked := "CHAIN SICKLE" if before < 400 and earned >= 400 else ""
+	var unlocked := ""
+	var affordable := RunData.RELICS.filter(func(r): return not r.id in relics and r.cost <= bank and r.cost > bank - kept)
+	if not affordable.is_empty():
+		unlocked = "NEW IN THE RELIQUARY · %s" % affordable[0].name
 	if unlocked_vigil > 0:
 		unlocked = ("%s  ·  " % unlocked if unlocked != "" else "") + "VIGIL %s" % roman(unlocked_vigil)
 		unlocked_vigil = 0

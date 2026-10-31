@@ -19,6 +19,8 @@ var summary = null
 var scene = null
 # the title screen: {t, cb}
 var title_screen = null
+# the Reliquary, opened from the title screen: {pick, t, msg, msg_t}
+var reliquary = null
 # achievement toasts: [{name, t}]
 var toasts: Array = []
 var hp_show := 1.0
@@ -93,8 +95,12 @@ func _process(dt: float) -> void:
 	for tst in toasts:
 		tst.t += dt
 	toasts = toasts.filter(func(tst): return tst.t < 4.0)
-	if title_screen != null:
+	if title_screen != null and reliquary != null:
+		_step_reliquary(dt)
+	elif title_screen != null:
 		title_screen.t += dt
+		if title_screen.t > 0.4 and Input.is_action_just_pressed("dash"):
+			reliquary = {"pick": 0, "t": 0.0, "msg": "", "msg_t": 0.0}
 		if Input.is_action_just_pressed("left"):
 			game.vigil = maxi(0, game.vigil - 1)
 		if Input.is_action_just_pressed("right"):
@@ -193,6 +199,8 @@ func _paint() -> void:
 		_paint_death(vp)
 	if title_screen != null:
 		_paint_title(vp)
+		if reliquary != null:
+			_paint_reliquary(vp)
 	elif scene != null:
 		_paint_scene(vp)
 	elif menu != null:
@@ -228,6 +236,57 @@ func _paint_title(vp: Vector2) -> void:
 	_text(stats + "   ·   ACHIEVEMENTS %d / %d" % [game.achieved.size(), Achievements.LIST.size()], Vector2(mid.x, vp.y - 110), 13, Color(0.6, 0.57, 0.54), true)
 	var blink := 0.5 + 0.5 * sin(t * 4)
 	_text("PRESS SPACE OR J TO DESCEND", Vector2(mid.x, vp.y - 70), 16, Color(0.95, 0.92, 0.88, 0.4 + 0.6 * blink), true)
+	var open := RunData.RELICS.filter(func(r): return not r.id in game.relics).size()
+	_text("SHIFT / K / RB  THE RELIQUARY  ·  %d TO BUY" % open if open > 0 else "THE RELIQUARY IS COMPLETE", Vector2(mid.x, vp.y - 44), 12, Color("#3fd6c4"), true)
+
+
+func _step_reliquary(dt: float) -> void:
+	var r: Dictionary = reliquary
+	r.t += dt
+	r.msg_t = maxf(0, r.msg_t - dt)
+	var n := RunData.RELICS.size()
+	if Input.is_action_just_pressed("up"):
+		r.pick = (r.pick + n - 1) % n
+	if Input.is_action_just_pressed("down"):
+		r.pick = (r.pick + 1) % n
+	if r.t > 0.25 and (Input.is_action_just_pressed("dash") or Input.is_action_just_pressed("pause")):
+		reliquary = null
+		return
+	if r.t > 0.25 and (Input.is_action_just_pressed("jump") or Input.is_action_just_pressed("attack")):
+		var rel: Dictionary = RunData.RELICS[r.pick]
+		if rel.id in game.relics:
+			r.msg = "ALREADY YOURS"
+		elif game.buy_relic(r.pick):
+			r.msg = "%s IS YOURS" % rel.name
+		else:
+			r.msg = "NOT ENOUGH ASH"
+		r.msg_t = 1.6
+
+
+func _paint_reliquary(vp: Vector2) -> void:
+	var r: Dictionary = reliquary
+	canvas.draw_rect(Rect2(Vector2.ZERO, vp), Color(0.02, 0.01, 0.02, 0.95))
+	var mid := vp / 2
+	_text("THE RELIQUARY", Vector2(mid.x, 80), 40, Color("#f3ebe0"), true)
+	_text("BANKED ASH %d  ·  WHAT YOU BUY HERE STAYS FOREVER" % game.bank, Vector2(mid.x, 108), 13, Color("#3fd6c4"), true)
+	var x0 := mid.x - 360
+	for i in RunData.RELICS.size():
+		var rel: Dictionary = RunData.RELICS[i]
+		var y := 140.0 + i * 46
+		var sel: bool = i == r.pick
+		var owned: bool = rel.id in game.relics
+		var can: bool = game.bank >= rel.cost
+		canvas.draw_rect(Rect2(x0, y, 720, 40), Color(0.08, 0.06, 0.09, 1) if sel else Color(0.05, 0.04, 0.06, 1))
+		if sel:
+			canvas.draw_rect(Rect2(x0, y, 720, 40), Color("#f2b43a"), false, 2)
+		var col := Color(0.55, 0.52, 0.5) if owned else (Color("#f3ebe0") if can else Color(0.45, 0.42, 0.4))
+		_text(rel.kind, Vector2(x0 + 14, y + 25), 10, Color("#3fd6c4") if rel.kind == "PERK" else (Color("#f2b43a") if rel.kind == "WEAPON" else Color("#b44dff")))
+		_text(rel.name, Vector2(x0 + 80, y + 18), 15, col)
+		_text(rel.desc, Vector2(x0 + 80, y + 35), 11, Color(0.75, 0.7, 0.66) if not owned else Color(0.5, 0.47, 0.45))
+		_text("OWNED" if owned else "%d ASH" % rel.cost, Vector2(x0 + 650, y + 26), 13, Color("#3fd6c4") if owned else (Color("#f2b43a") if can else Color(0.5, 0.45, 0.4)))
+	if r.msg_t > 0:
+		_text(r.msg, Vector2(mid.x, vp.y - 70), 20, Color("#f2b43a"), true)
+	_text("UP / DOWN  CHOOSE      SPACE / J  BUY      SHIFT / ESC  BACK", Vector2(mid.x, vp.y - 30), 12, Color(0.55, 0.5, 0.47), true)
 
 
 ## Souls-like death: a black band fades in and EXTINGUISHED slowly grows in it.
