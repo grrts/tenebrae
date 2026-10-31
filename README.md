@@ -81,7 +81,7 @@ The name comes from an old church service where 15 candles on a triangular stand
 
 - Maps are read with `FileAccess` from `res://maps`. For an exported build, add `maps/*.txt` to the export preset's non-resource include filter.
 - Physics interpolation is on (Godot 4.3), so movement stays smooth on 144 Hz and faster screens. Anything that teleports calls `reset_physics_interpolation()`.
-- The pause menu has Options: screen shake and fullscreen, saved to `user://tenebrae.cfg`.
+- The pause menu has Options, saved to `user://tenebrae.cfg`: screen shake (100, 50, 0%), flashes (off is photosensitivity mode), hit-stop, fullscreen, and two assists that never block achievements: game speed (100, 85, 70%) and +2 starting hearts.
 
 ## Playable browser build
 

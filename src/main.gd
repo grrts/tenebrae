@@ -62,8 +62,12 @@ var elite_kills := 0
 var run_braziers := 0
 var boss_untouched := false
 # options, saved with the meta progress
-var opt_shake := true
+var opt_shake := 1.0 ## 1, 0.5 or 0
 var opt_fullscreen := false
+var opt_flashes := true ## false is photosensitivity mode: no full-screen flashes
+var opt_hitstop := true
+var opt_speed := 1.0 ## game speed: 1, 0.85 or 0.7
+var opt_hearts := false ## assist: +2 hearts; achievements still count
 
 # --smoke (used by CI): a bot mashes inputs, depths fly by, and the run is forced
 # through the boss, the hidden candle and a death, then the game quits.
@@ -188,11 +192,12 @@ func _smoke(dt: float) -> void:
 					# shake off, shake on, back to pause, then resume
 					m = hud.menu
 					hud.menu = null
-					m.cb.call([0, 0, 2][k])
+					m.cb.call([0, 0, m.opts.size() - 1][k] if k < 2 else hud_last(m))
 				m = hud.menu
 				hud.menu = null
 				m.cb.call(0)
-				print("smoke test: options ok, shake %s" % opt_shake)
+				print("smoke test: options ok, shake %.1f" % opt_shake)
+				opt_shake = 1.0
 				hud.open_title(_smoke_title_ok)
 		3:
 			# every arena loads and runs briefly
@@ -244,7 +249,7 @@ func chapter() -> int:
 
 ## A new run. i is the map; the story always begins in the Pit, the number keys can start elsewhere for testing.
 func start(i: int, show_title := false) -> void:
-	Engine.time_scale = 1.0
+	Engine.time_scale = opt_speed
 	if player:
 		player.queue_free()
 	for n in [fx, dbg, camera, hex_layer]:
@@ -288,7 +293,9 @@ func _begin() -> void:
 	hidden_candle = vigil < 3
 	if vigil >= 5:
 		player.max_hp -= 1
-		player.hp = player.max_hp
+	if opt_hearts:
+		player.max_hp += 2
+	player.hp = player.max_hp
 	_play_once("prologue", Story.PROLOGUE, _weapon_draw)
 
 
@@ -312,9 +319,17 @@ func _pause_pick(i: int, opts: Array) -> void:
 			open_options()
 
 
+func hud_last(m) -> int:
+	return m.opts.size() - 1
+
+
 func open_options() -> void:
 	var opts := [
-		{"id": "shake", "name": "SHAKE %s" % ("ON" if opt_shake else "OFF"), "desc": "Screen shake on hits, slams and bosses.", "tag": "OPTION"},
+		{"id": "shake", "name": "SHAKE %d%%" % roundi(opt_shake * 100), "desc": "Screen shake on hits, slams and bosses: 100, 50 or 0%.", "tag": "OPTION"},
+		{"id": "flash", "name": "FLASHES %s" % ("ON" if opt_flashes else "OFF"), "desc": "Off is photosensitivity mode: no full-screen flashes.", "tag": "OPTION"},
+		{"id": "stop", "name": "HIT-STOP %s" % ("ON" if opt_hitstop else "OFF"), "desc": "The tiny freeze when a hit lands.", "tag": "OPTION"},
+		{"id": "speed", "name": "SPEED %d%%" % roundi(opt_speed * 100), "desc": "Assist: slow the whole game to 85 or 70%. Achievements still count.", "tag": "ASSIST"},
+		{"id": "hearts", "name": "+2 HEARTS %s" % ("ON" if opt_hearts else "OFF"), "desc": "Assist: start each run with two extra hearts. Applies next run.", "tag": "ASSIST"},
 		{"id": "full", "name": "FULLSCREEN %s" % ("ON" if opt_fullscreen else "OFF"), "desc": "Fill the screen, or play in a window.", "tag": "OPTION"},
 		{"id": "back", "name": "BACK", "desc": "Return to the pause menu.", "tag": ""},
 	]
@@ -324,7 +339,16 @@ func open_options() -> void:
 func _option_pick(i: int, opts: Array) -> void:
 	match opts[i].id:
 		"shake":
-			opt_shake = not opt_shake
+			opt_shake = 0.5 if opt_shake > 0.75 else (0.0 if opt_shake > 0.25 else 1.0)
+		"flash":
+			opt_flashes = not opt_flashes
+		"stop":
+			opt_hitstop = not opt_hitstop
+		"speed":
+			opt_speed = 0.85 if opt_speed > 0.9 else (0.7 if opt_speed > 0.75 else 1.0)
+			Engine.time_scale = opt_speed
+		"hearts":
+			opt_hearts = not opt_hearts
 		"full":
 			opt_fullscreen = not opt_fullscreen
 			_apply_options()
@@ -525,8 +549,13 @@ func _load_meta() -> void:
 		wins = cfg.get_value("meta", "wins", 0)
 		achieved = cfg.get_value("achievements", "unlocked", [])
 		elite_kills = cfg.get_value("achievements", "elite_kills", 0)
-		opt_shake = cfg.get_value("options", "shake", true)
+		var sh = cfg.get_value("options", "shake", 1.0)
+		opt_shake = (1.0 if sh else 0.0) if typeof(sh) == TYPE_BOOL else float(sh)
 		opt_fullscreen = cfg.get_value("options", "fullscreen", false)
+		opt_flashes = cfg.get_value("options", "flashes", true)
+		opt_hitstop = cfg.get_value("options", "hitstop", true)
+		opt_speed = cfg.get_value("options", "speed", 1.0)
+		opt_hearts = cfg.get_value("options", "hearts", false)
 
 
 func _save_meta() -> void:
@@ -541,6 +570,10 @@ func _save_meta() -> void:
 	cfg.set_value("achievements", "elite_kills", elite_kills)
 	cfg.set_value("options", "shake", opt_shake)
 	cfg.set_value("options", "fullscreen", opt_fullscreen)
+	cfg.set_value("options", "flashes", opt_flashes)
+	cfg.set_value("options", "hitstop", opt_hitstop)
+	cfg.set_value("options", "speed", opt_speed)
+	cfg.set_value("options", "hearts", opt_hearts)
 	cfg.save(SAVE_PATH)
 
 
@@ -581,6 +614,8 @@ func _step_pickups(dt: float) -> void:
 func _physics_process(dt: float) -> void:
 	if smoke:
 		_smoke(dt)
+	if not opt_hitstop:
+		hitstop = 0.0
 	if hitstop > 0:
 		hitstop -= dt
 		return
@@ -884,13 +919,13 @@ func on_player_dead() -> void:
 	shake(0.4, 14)
 	hitstop = 0.25
 	hud.flash(Color("#e5383b"), 0.35)
-	Engine.time_scale = 0.5
+	Engine.time_scale = 0.5 * opt_speed
 	fx.burst(player.position + Vector2(0, -30), 30, Color("#0a0a0d"), 120)
 	fx.burst(player.position + Vector2(0, -30), 22, Color("#f2b43a"), 90)
 
 
 func _end_run() -> void:
-	Engine.time_scale = 1.0
+	Engine.time_scale = opt_speed
 	var kept := (run_wax if won else roundi(run_wax * 0.4)) + bosses * 50
 	var before := earned
 	bank += kept
@@ -912,10 +947,10 @@ func _end_run() -> void:
 
 
 func shake(t: float, mag: float) -> void:
-	if not opt_shake:
+	if opt_shake <= 0:
 		return
 	shake_t = maxf(shake_t, t)
-	shake_mag = maxf(shake_mag, mag)
+	shake_mag = maxf(shake_mag, mag * opt_shake)
 
 
 func debug_box(r: Rect2, c: Color) -> void:

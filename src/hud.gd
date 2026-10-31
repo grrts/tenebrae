@@ -43,6 +43,8 @@ func play(cards: Array, cb: Callable) -> void:
 
 
 func flash(col: Color, t := 0.25) -> void:
+	if not game.opt_flashes:
+		return
 	flash_col = col
 	flash_t = t
 
@@ -291,8 +293,8 @@ func _paint_menu(vp: Vector2) -> void:
 	_text(menu.title, Vector2(vp.x / 2, 110), 40, Color("#f3ebe0"), true)
 	_text(menu.sub, Vector2(vp.x / 2, 140), 14, Color(0.6, 0.57, 0.54), true)
 	var n: int = menu.opts.size()
-	var cw := 240.0
-	var gap := 26.0
+	var gap := 26.0 if n <= 4 else 14.0
+	var cw := minf(240.0, (vp.x - 60 - (n - 1) * gap) / n)
 	var x0 := (vp.x - n * cw - (n - 1) * gap) / 2
 	for i in n:
 		var o: Dictionary = menu.opts[i]
@@ -302,7 +304,7 @@ func _paint_menu(vp: Vector2) -> void:
 		canvas.draw_rect(r, Color("#f2b43a") if sel else Color(0.35, 0.3, 0.28), false, 3.0 if sel else 1.5)
 		var col: Color = o.get("col", Color("#f3ebe0"))
 		_text(o.get("tag", ""), Vector2(r.position.x + cw / 2, r.position.y + 34), 12, col, true)
-		_text(o.name, Vector2(r.position.x + cw / 2, r.position.y + 120), 26, col, true)
+		_text(o.name, Vector2(r.position.x + cw / 2, r.position.y + 120), 26 if n <= 4 else 17, col, true)
 		var words: PackedStringArray = String(o.desc).split(" ")
 		var line := ""
 		var y := r.position.y + 160
