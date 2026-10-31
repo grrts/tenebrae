@@ -86,3 +86,13 @@ The name comes from an old church service where 15 candles on a triangular stand
 ## Playable browser build
 
 `web/tenebrae-play.html` is a playable browser version of the same design (keyboard or controller), published as a link with every update. It is generated from the pitch page source with `python3 web/build_play.py` run inside `web/`. A Godot web export will replace it once the build is hosted.
+
+## Sound
+
+All audio is original and procedural. Nothing is sampled or licensed.
+
+- **Browser build:** `web/audio.js` synthesizes everything live with Web Audio. It watches the game state each frame (`AUDIO.watch`) and plays SFX, the score and the cutscene voices. **M** mutes.
+- **Godot build:** `src/audio.gd` is the `Sfx` autoload. It watches `Game` the same way and plays the rendered files in `audio/` (`sfx/`, looping score stems per chapter in `music/`, and a gibberish voice per spoken line in `vo/`, named by the line's md5). **M** mutes. Other code can also call `Sfx.play("ui_ok")` directly.
+- **Re-rendering:** after changing `web/audio.js` or a spoken line in `src/story.gd`, run `node tools/render_audio.js` from the repo root (needs Playwright's Chromium and ffmpeg). Both builds then sound the same.
+- **Voices:** speech is gibberish, formant-synthesized from the letters of each line, with one voice per speaker (`CAST` in `web/audio.js`).
+- **Score:** a drone and a choir in a different mode per dungeon. It thins and darkens as the candles go out, drums come in as the fight heats up, and bosses get their own faster stem.
