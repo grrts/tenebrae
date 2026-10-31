@@ -19,6 +19,8 @@ var summary = null
 var scene = null
 # the title screen: {t, cb}
 var title_screen = null
+# achievement toasts: [{name, t}]
+var toasts: Array = []
 var flash_col := Color.WHITE
 var flash_t := 0.0
 
@@ -85,6 +87,9 @@ func show_banner(text: String, sub: String, t := 1.6) -> void:
 func _process(dt: float) -> void:
 	banner_t = maxf(0, banner_t - dt)
 	flash_t = maxf(0, flash_t - dt)
+	for tst in toasts:
+		tst.t += dt
+	toasts = toasts.filter(func(tst): return tst.t < 4.0)
 	if title_screen != null:
 		title_screen.t += dt
 		if Input.is_action_just_pressed("left"):
@@ -185,6 +190,14 @@ func _paint() -> void:
 		_paint_menu(vp)
 	elif summary != null:
 		_paint_summary(vp)
+	for i in toasts.size():
+		var tst: Dictionary = toasts[i]
+		var a := clampf(minf(tst.t * 4, (4.0 - tst.t) * 2), 0, 1)
+		var r := Rect2(vp.x - 330, vp.y - 110 - i * 64, 310, 54)
+		canvas.draw_rect(r, Color(0.04, 0.03, 0.05, 0.9 * a))
+		canvas.draw_rect(r, Color(0.95, 0.7, 0.23, a), false, 1.5)
+		_text("ACHIEVEMENT", r.position + Vector2(14, 20), 11, Color(0.95, 0.7, 0.23, a))
+		_text(tst.name, r.position + Vector2(14, 42), 18, Color(0.95, 0.92, 0.88, a))
 	if flash_t > 0:
 		canvas.draw_rect(Rect2(Vector2.ZERO, vp), Color(flash_col, clampf(flash_t * 4, 0, 1) * 0.85))
 
@@ -203,7 +216,7 @@ func _paint_title(vp: Vector2) -> void:
 		_text("<   VIGIL %s   >" % (Game.roman(v) if v > 0 else "0"), Vector2(mid.x, mid.y + 50), 22, Color("#e5383b") if v > 0 else Color("#f3ebe0"), true)
 		_text(RunData.VIGILS[v] if v == 0 else "Every Vigil up to %s:  %s" % [Game.roman(v), RunData.VIGILS[v]], Vector2(mid.x, mid.y + 76), 14, Color(0.7, 0.66, 0.62), true)
 	var stats := "BANKED WAX %d   ·   DEEPEST %s   ·   DAWNS %d" % [game.bank, Game.roman(maxi(1, game.best_depth)), game.wins]
-	_text(stats, Vector2(mid.x, vp.y - 110), 13, Color(0.6, 0.57, 0.54), true)
+	_text(stats + "   ·   ACHIEVEMENTS %d / %d" % [game.achieved.size(), Achievements.LIST.size()], Vector2(mid.x, vp.y - 110), 13, Color(0.6, 0.57, 0.54), true)
 	var blink := 0.5 + 0.5 * sin(t * 4)
 	_text("PRESS SPACE OR J TO DESCEND", Vector2(mid.x, vp.y - 70), 16, Color(0.95, 0.92, 0.88, 0.4 + 0.6 * blink), true)
 

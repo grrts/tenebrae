@@ -57,6 +57,10 @@ var best_depth := 0
 var wins := 0
 var sets_done: Array[String] = []
 var unlocked_vigil := 0
+var achieved: Array = []
+var elite_kills := 0
+var run_braziers := 0
+var boss_untouched := false
 # options, saved with the meta progress
 var opt_shake := true
 var opt_fullscreen := false
@@ -261,6 +265,7 @@ func start(i: int, show_title := false) -> void:
 	won = false
 	runes.clear()
 	sets_done.clear()
+	run_braziers = 0
 	lvl = 1
 	xp = 0
 	run_wax = 0
@@ -403,6 +408,23 @@ func _equip(id: String) -> void:
 	player.slam_radius = 160.0 * wd.get("slam_mul", 1.0)
 
 
+## Unlocks an achievement once and shows a toast. A Steam build calls SetAchievement(id) here.
+func unlock(id: String) -> void:
+	if id in achieved:
+		return
+	achieved.append(id)
+	_save_meta()
+	for a in Achievements.LIST:
+		if a.id == id:
+			hud.toasts.append({"name": a.name, "t": 0.0})
+	if smoke:
+		print("smoke test: achievement %s" % id)
+
+
+func on_player_hit() -> void:
+	boss_untouched = false
+
+
 func has_rune(r: String) -> bool:
 	return r in runes
 
@@ -452,6 +474,8 @@ func _take_rune(id: String) -> void:
 			player.hp = minf(player.hp, 3)
 	var rd: Dictionary = RunData.RUNES[id]
 	hud.show_banner(id, String(rd.desc).to_upper(), 1.4)
+	if rd.rar == "cursed":
+		unlock("CURSED")
 	var sg: String = rd.sig
 	if not sg in sets_done and runes.filter(func(r): return RunData.RUNES[r].sig == sg).size() >= 2:
 		sets_done.append(sg)
@@ -461,6 +485,7 @@ func _take_rune(id: String) -> void:
 			"ECHO":
 				player.slam_radius *= 1.25
 		hud.show_banner("%s SET" % sg, String(RunData.SETS[sg]).to_upper(), 2.0)
+		unlock("FULL_SET")
 
 
 func heal(n: int) -> void:
@@ -498,6 +523,8 @@ func _load_meta() -> void:
 		vigil_max = cfg.get_value("meta", "vigil_max", 0)
 		best_depth = cfg.get_value("meta", "best_depth", 0)
 		wins = cfg.get_value("meta", "wins", 0)
+		achieved = cfg.get_value("achievements", "unlocked", [])
+		elite_kills = cfg.get_value("achievements", "elite_kills", 0)
 		opt_shake = cfg.get_value("options", "shake", true)
 		opt_fullscreen = cfg.get_value("options", "fullscreen", false)
 
@@ -510,6 +537,8 @@ func _save_meta() -> void:
 	cfg.set_value("meta", "vigil_max", vigil_max)
 	cfg.set_value("meta", "best_depth", best_depth)
 	cfg.set_value("meta", "wins", wins)
+	cfg.set_value("achievements", "unlocked", achieved)
+	cfg.set_value("achievements", "elite_kills", elite_kills)
 	cfg.set_value("options", "shake", opt_shake)
 	cfg.set_value("options", "fullscreen", opt_fullscreen)
 	cfg.save(SAVE_PATH)
@@ -629,6 +658,7 @@ func _spawn_boss() -> void:
 	move_child(boss, world.get_index() + 1)
 	boss.reset_physics_interpolation()
 	enemies.append(boss)
+	boss_untouched = true
 	shake(0.7, 18)
 	hitstop = 0.15
 	hud.show_banner("DEPTH %s · STREPITUS" % roman(depth), "%s DESCENDS" % boss.boss_name, 2.4)
@@ -644,6 +674,11 @@ func _after_boss(ch: int) -> void:
 
 func _victory() -> void:
 	won = true
+	unlock("DAWN")
+	if hidden_candle and vigil < 3:
+		unlock("DAWN_UNAIDED")
+	if vigil >= 5:
+		unlock("VIGIL_V")
 	_end_run()
 
 
@@ -656,6 +691,7 @@ func try_revive() -> bool:
 	if not hidden_candle:
 		return false
 	hidden_candle = false
+	unlock("NOT_YET")
 	player.hp = ceilf(player.max_hp / 2)
 	player.invuln = 2.2
 	hitstop = 0.3
@@ -679,6 +715,9 @@ func strike_braziers(box: Rect2) -> void:
 			fx.burst(b, 16, Color("#f2b43a"), 180)
 			if has_rune("KINDLING"):
 				heal(1)
+			run_braziers += 1
+			if run_braziers >= 10:
+				unlock("LAMPLIGHTER")
 			hud.show_banner("BRAZIER RELIT", "+15%% DAMAGE AND MORE LIGHT FOR %d S" % int(dur), 1.2)
 
 
@@ -802,6 +841,10 @@ func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 		fx.burst(e.position + Vector2(0, -28), 18, Color("#0a0a0d"), 260)
 		e.visible = false
 		_drop_wax(e.position + Vector2(0, -28), 26 if e == boss else (4 if e.kind == Enemy.Kind.BRUTE else 2) * (3 if e.elite != "" else 1))
+		if e.elite != "":
+			elite_kills += 1
+			if elite_kills >= 25:
+				unlock("ELITE_HUNTER")
 		if e.elite == "VOLATILE":
 			fx.ring(e.position + Vector2(0, -20), 90, Color("#ff8a5c"))
 			fx.burst(e.position + Vector2(0, -20), 20, Color("#ff8a5c"), 240)
@@ -821,6 +864,11 @@ func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 			hud.show_banner("BLOODLINE", "+1 HEART", 1.0)
 		if e == boss:
 			bosses += 1
+			var bi: int = (e as Boss).idx
+			if bi < 3:
+				unlock(["WARDEN_FREED", "KING_DROWNED", "JARL_SONG"][bi])
+			if boss_untouched and not smoke:
+				unlock("UNTOUCHED")
 			story_hold = true
 			get_tree().create_timer(1.6).timeout.connect(_after_boss.bind((e as Boss).idx))
 			boss = null
