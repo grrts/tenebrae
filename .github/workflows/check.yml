@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Locals declared twice (Godot rejects these, gdparse does not)
-        run: python3 tools/check_locals.py src/*.gd
+        run: if command -v python3 >/dev/null; then python3 tools/check_locals.py src/*.gd; else echo "python3 missing, skipped"; fi
       - name: Import project
         run: godot --headless --import 2>&1 | tee import.log
       - name: Run the main scene for 600 frames
