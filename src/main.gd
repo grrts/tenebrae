@@ -58,6 +58,9 @@ var wins := 0
 var sets_done: Array[String] = []
 var unlocked_vigil := 0
 var achieved: Array = []
+var relics: Array = []
+var skill_meter := 0.0 ## 0..1, full = the weapon skill is ready
+var skill_hit := false ## true while a skill's own hits land, so they don't refill the meter
 var elite_kills := 0
 var run_braziers := 0
 var boss_untouched := false
@@ -201,6 +204,17 @@ func _smoke(dt: float) -> void:
 				m.cb.call(0)
 				print("smoke test: options ok, shake %.1f" % opt_shake)
 				opt_shake = 1.0
+				bank += 2000
+				var bought := 0
+				for i in RunData.RELICS.size():
+					if buy_relic(i):
+						bought += 1
+				print("smoke test: reliquary bought %d relics" % bought)
+				for w in RunData.SKILLS:
+					_equip(w)
+					skill_meter = 1.0
+					use_skill()
+				print("smoke test: all weapon skills fired")
 				# controls: rebind jump to L, check the map and the dev keys, then back to defaults
 				open_controls()
 				m = hud.menu
@@ -290,6 +304,7 @@ func start(i: int, show_title := false) -> void:
 	won = false
 	runes.clear()
 	sets_done.clear()
+	skill_meter = 0.0
 	offered.clear()
 	run_braziers = 0
 	lvl = 1
@@ -316,6 +331,8 @@ func _begin() -> void:
 		player.max_hp -= 1
 	if opt_hearts:
 		player.max_hp += 2
+	if "ashen_skin" in relics:
+		player.max_hp += 1
 	player.hp = player.max_hp
 	_play_once("prologue", Story.PROLOGUE, _weapon_draw)
 
@@ -388,9 +405,9 @@ func _option_pick(i: int, opts: Array) -> void:
 	open_options()
 
 
-const CONTROL_NAMES := {"left": "MOVE LEFT", "right": "MOVE RIGHT", "up": "UP", "down": "DOWN", "jump": "JUMP", "attack": "ATTACK", "dash": "DASH"}
+const CONTROL_NAMES := {"left": "MOVE LEFT", "right": "MOVE RIGHT", "up": "UP", "down": "DOWN", "jump": "JUMP", "attack": "ATTACK", "dash": "DASH", "skill": "WEAPON SKILL"}
 const CONTROL_DESC := {"left": "", "right": "", "up": "Also jumps while UP JUMPS is on.", "down": "Drop through bridges (with jump), slam (with attack in the air).",
-	"jump": "Jump, double jump, wall jump. Hold for height.", "attack": "Tap to swing, hold to keep the combo going.", "dash": "I-frames. Cancels any swing."}
+	"jump": "Jump, double jump, wall jump. Hold for height.", "attack": "Tap to swing, hold to keep the combo going.", "dash": "I-frames. Cancels any swing.", "skill": "Fires when the skill meter is full."}
 
 
 func open_controls() -> void:
@@ -399,10 +416,10 @@ func open_controls() -> void:
 		var names := []
 		for k in keys_of(a):
 			names.append(key_name(k))
-		opts.append({"id": a, "name": "%s  %s" % [CONTROL_NAMES[a], " / ".join(names)],
+		opts.append({"id": a, "name": CONTROL_NAMES[a], "value": "PRESS A KEY…" if rebinding == a else " / ".join(names),
 			"desc": "PRESS A KEY OR MOUSE BUTTON  ·  ESC CANCELS" if rebinding == a else "%s Pick to rebind." % CONTROL_DESC[a], "tag": "REBIND"})
-	opts.append({"id": "upjump", "name": "UP JUMPS %s" % ("ON" if opt_up_jump else "OFF"), "desc": "W and Up also jump.", "tag": "OPTION"})
-	opts.append({"id": "reset", "name": "DEFAULTS", "desc": "WASD + Space / J / K or mouse, and arrows + Z / X / C.", "tag": "OPTION"})
+	opts.append({"id": "upjump", "name": "UP ALSO JUMPS", "value": "ON" if opt_up_jump else "OFF", "desc": "W and Up also jump.", "tag": "OPTION"})
+	opts.append({"id": "reset", "name": "RESET TO DEFAULTS", "desc": "WASD + Space / J / K or mouse, and arrows + Z / X / C.", "tag": "OPTION"})
 	opts.append({"id": "back", "name": "BACK", "desc": "Return to the options.", "tag": ""})
 	hud.open_choice("CONTROLS", "WAITING FOR A KEY" if rebinding != "" else "SAVED BETWEEN SESSIONS", opts, _controls_pick.bind(opts), open_options)
 	if rebinding != "":
@@ -479,18 +496,20 @@ func _play_once(id: String, cards: Array, cb: Callable) -> void:
 
 
 func _weapon_draw() -> void:
-	var pool := RunData.WEAPONS.keys().filter(func(k): return not RunData.WEAPONS[k].get("locked", false) or earned >= 400)
+	var pool := RunData.WEAPONS.keys().filter(func(k): return not RunData.WEAPONS[k].get("locked", false) or k in relics)
 	pool.shuffle()
 	var opts := []
-	for k in pool.slice(0, 2):
+	for k in pool.slice(0, 3 if "second_draw" in relics else 2):
 		var wd: Dictionary = RunData.WEAPONS[k]
-		opts.append({"id": k, "name": wd.name, "desc": wd.desc, "tag": "WEAPON", "col": Color("#f3ebe0")})
+		opts.append({"id": k, "name": wd.name, "desc": "%s Skill: %s, %s" % [wd.desc, RunData.SKILLS[k].name, String(RunData.SKILLS[k].desc).to_lower()], "tag": "WEAPON", "col": Color("#f3ebe0")})
 	hud.open_choice("CHOOSE YOUR WEAPON", "A NEW DRAW EVERY RUN", opts, func(i): _pick_weapon(opts[i]))
 
 
 func _pick_weapon(o: Dictionary) -> void:
 	_equip(o.id)
 	hud.show_banner("DEPTH I", "%s · %s" % [o.name, Story.CHAPTERS[0].name], 1.8)
+	if "spare_rune" in relics:
+		_open_draft()
 
 
 func _equip(id: String) -> void:
@@ -534,6 +553,75 @@ func _log_run() -> void:
 		print("smoke test: run logged, won %s, depth %d" % [won, depth])
 
 
+## Buys relic i from the Reliquary if the bank allows. Returns true on a purchase.
+func buy_relic(i: int) -> bool:
+	var r: Dictionary = RunData.RELICS[i]
+	if r.id in relics or bank < r.cost:
+		return false
+	bank -= r.cost
+	relics.append(r.id)
+	_save_meta()
+	if relics.size() >= RunData.RELICS.size():
+		unlock("RELIQUARY")
+	return true
+
+
+## The weapon skill. Each weapon gets one big move; landing hits charges it.
+func use_skill() -> void:
+	skill_meter = 0.0
+	skill_hit = true
+	var p := player
+	var f := float(p.facing)
+	var base := p.damage * 3.0
+	hitstop = 0.12
+	shake(0.35, 12)
+	player.invuln = maxf(player.invuln, 0.4)
+	match weapon:
+		"katana":
+			var x0 := p.position.x
+			var x := x0
+			for i in 26:
+				var nx := x + f * 12
+				if world.is_solid(world.cell(nx + f * 12), world.cell(p.position.y - 30)):
+					break
+				x = nx
+			p.position.x = x
+			p.reset_physics_interpolation()
+			fx.burst(Vector2((x0 + x) / 2, p.position.y - 30), 30, Color("#f2b43a"), 200)
+			for e in enemies.duplicate():
+				if not e.dead and (e.position.x - x0) * f > -20 and (e.position.x - x) * f < 30 and absf(e.position.y - p.position.y) < 80:
+					hit_enemy(e, base, Vector2(f * 300, -300))
+		"greatsword":
+			fx.ring(p.position, 420, Color("#f2b43a"))
+			for e in enemies.duplicate():
+				if not e.dead and absf(e.position.x - p.position.x) < 420 and absf(e.position.y - p.position.y) < 50:
+					hit_enemy(e, base * 1.2, Vector2(signf(e.position.x - p.position.x) * 200, -700))
+		"spear":
+			p.vel.y = -1250
+			fx.burst(p.position + Vector2(0, -40), 24, Color("#f2b43a"), 260)
+			for e in enemies.duplicate():
+				if not e.dead and absf(e.position.x - p.position.x) < 60 and p.position.y - e.position.y > -40 and p.position.y - e.position.y < 380:
+					hit_enemy(e, base, Vector2(0, -800))
+		"daggers":
+			var near := enemies.filter(func(e): return not e.dead and e.position.distance_to(p.position) < 170)
+			for k in 8:
+				for e in near:
+					if not e.dead:
+						hit_enemy(e, base * 0.3, Vector2(signf(e.position.x - p.position.x) * 60, -60))
+			fx.ring(p.position + Vector2(0, -30), 170, Color("#f2b43a"))
+		"sickle":
+			for e in enemies.duplicate():
+				if not e.dead and e.position.distance_to(p.position) < 320 and e != boss:
+					e.position.x = p.position.x + signf(e.position.x - p.position.x) * 40
+					e.reset_physics_interpolation()
+					hit_enemy(e, base * 0.8, Vector2(0, -400))
+				elif e == boss and not e.dead and e.position.distance_to(p.position) < 320:
+					hit_enemy(e, base, Vector2.ZERO)
+			fx.ring(p.position + Vector2(0, -30), 320, Color("#f2b43a"))
+	skill_hit = false
+	hud.show_banner(RunData.SKILLS[weapon].name, "", 0.8)
+
+
 func on_player_hit() -> void:
 	boss_untouched = false
 
@@ -561,7 +649,7 @@ func xp_need() -> int:
 
 
 func _open_draft() -> void:
-	var pool := RunData.RUNES.keys().filter(func(k): return not (k in runes))
+	var pool := RunData.RUNES.keys().filter(func(k): return not (k in runes) and (not RunData.RUNES[k].get("locked", false) or k in relics))
 	pool.shuffle()
 	var opts := []
 	for k in pool.slice(0, 3):
@@ -639,6 +727,10 @@ func _load_meta() -> void:
 		best_depth = cfg.get_value("meta", "best_depth", 0)
 		wins = cfg.get_value("meta", "wins", 0)
 		achieved = cfg.get_value("achievements", "unlocked", [])
+		relics = cfg.get_value("meta", "relics", [])
+		if earned >= 400 and not "sickle" in relics:
+			# saves from before the Reliquary unlocked the sickle at 400 earned
+			relics.append("sickle")
 		elite_kills = cfg.get_value("achievements", "elite_kills", 0)
 		var sh = cfg.get_value("options", "shake", 1.0)
 		opt_shake = (1.0 if sh else 0.0) if typeof(sh) == TYPE_BOOL else float(sh)
@@ -661,6 +753,7 @@ func _save_meta() -> void:
 	cfg.set_value("meta", "best_depth", best_depth)
 	cfg.set_value("meta", "wins", wins)
 	cfg.set_value("achievements", "unlocked", achieved)
+	cfg.set_value("meta", "relics", relics)
 	cfg.set_value("achievements", "elite_kills", elite_kills)
 	cfg.set_value("options", "shake", opt_shake)
 	cfg.set_value("options", "fullscreen", opt_fullscreen)
@@ -732,6 +825,8 @@ func _physics_process(dt: float) -> void:
 			_end_run()
 		return
 	run_time += dt
+	if Input.is_action_just_pressed("skill") and skill_meter >= 1.0:
+		use_skill()
 	_step_pickups(dt)
 	if boss == null and not story_hold and depth < 16:
 		depth_t += dt
@@ -797,6 +892,8 @@ func _spawn_boss() -> void:
 
 ## After a boss: its last words, then the merchant. After Saint Umber: the finale and the dawn.
 func _after_boss(ch: int) -> void:
+	if "ember_flask" in relics:
+		heal(1)
 	if ch == 3:
 		hud.play(Story.ENDINGS[3], _victory)
 	else:
@@ -961,6 +1058,11 @@ func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 	var guard := 0.5 if e.elite == "SHIELDED" and kb.x != 0 and signf(kb.x) == -e.facing else 1.0
 	if guard < 1:
 		fx.spark(e.position + Vector2(e.facing * 16, -30))
+	if not skill_hit and weapon != "":
+		var was_ready := skill_meter >= 1.0
+		skill_meter = minf(1.0, skill_meter + (0.05 if e == boss else 0.07))
+		if not was_ready and skill_meter >= 1.0:
+			hud.show_banner("%s READY" % RunData.SKILLS[weapon].name, "PRESS L, Q OR Y", 1.0)
 	e.hp -= dmg * damage_mul() * guard * (1.6 if e == boss and has_rune("TALLOW CROWN") else 1.0)
 	e.knock(kb)
 	hitstop = maxf(hitstop, 0.05)
@@ -1034,7 +1136,10 @@ func _end_run() -> void:
 			vigil_max += 1
 			unlocked_vigil = vigil_max
 	_save_meta()
-	var unlocked := "CHAIN SICKLE" if before < 400 and earned >= 400 else ""
+	var unlocked := ""
+	var affordable := RunData.RELICS.filter(func(r): return not r.id in relics and r.cost <= bank and r.cost > bank - kept)
+	if not affordable.is_empty():
+		unlocked = "NEW IN THE RELIQUARY · %s" % affordable[0].name
 	if unlocked_vigil > 0:
 		unlocked = ("%s  ·  " % unlocked if unlocked != "" else "") + "VIGIL %s" % roman(unlocked_vigil)
 		unlocked_vigil = 0
@@ -1129,9 +1234,9 @@ func _unhandled_input(ev: InputEvent) -> void:
 const DEFAULT_KEYS := {
 	"left": [KEY_A, KEY_LEFT], "right": [KEY_D, KEY_RIGHT], "up": [KEY_W, KEY_UP], "down": [KEY_S, KEY_DOWN],
 	"jump": [KEY_SPACE, KEY_Z], "attack": [KEY_J, KEY_X, -MOUSE_BUTTON_LEFT], "dash": [KEY_SHIFT, KEY_K, KEY_C, -MOUSE_BUTTON_RIGHT],
-	"pause": [KEY_ESCAPE, KEY_P], "confirm": [KEY_ENTER, KEY_KP_ENTER], "back": [KEY_BACKSPACE],
+	"skill": [KEY_Q, KEY_L], "pause": [KEY_ESCAPE, KEY_P], "confirm": [KEY_ENTER, KEY_KP_ENTER], "back": [KEY_BACKSPACE],
 }
-const REBINDABLE := ["left", "right", "up", "down", "jump", "attack", "dash"]
+const REBINDABLE := ["left", "right", "up", "down", "jump", "attack", "dash", "skill"]
 var binds := {} ## action -> its first key (a physical keycode, or -mouse button), when the player changed it
 var opt_up_jump := true ## W / Up also jump
 var rebinding := "" ## the action waiting for a key in Options > Controls
@@ -1168,7 +1273,7 @@ func key_label(action: String) -> String:
 
 func _setup_input() -> void:
 	var pads := {"jump": [JOY_BUTTON_A], "attack": [JOY_BUTTON_X], "dash": [JOY_BUTTON_RIGHT_SHOULDER, JOY_BUTTON_B], "pause": [JOY_BUTTON_START],
-		"confirm": [JOY_BUTTON_A], "back": [JOY_BUTTON_B]}
+		"confirm": [JOY_BUTTON_A], "back": [JOY_BUTTON_B], "skill": [JOY_BUTTON_Y]}
 	var axes := {"left": [JOY_AXIS_LEFT_X, -1.0], "right": [JOY_AXIS_LEFT_X, 1.0], "up": [JOY_AXIS_LEFT_Y, -1.0], "down": [JOY_AXIS_LEFT_Y, 1.0]}
 	var dpad := {"left": JOY_BUTTON_DPAD_LEFT, "right": JOY_BUTTON_DPAD_RIGHT, "up": JOY_BUTTON_DPAD_UP, "down": JOY_BUTTON_DPAD_DOWN}
 	for action in DEFAULT_KEYS:

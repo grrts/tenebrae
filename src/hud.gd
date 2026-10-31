@@ -19,6 +19,8 @@ var summary = null
 var scene = null
 # the title screen: {t, cb}
 var title_screen = null
+# the Reliquary, opened from the title screen: {pick, t, msg, msg_t}
+var reliquary = null
 # achievement toasts: [{name, t}]
 var toasts: Array = []
 var hp_show := 1.0
@@ -95,8 +97,12 @@ func _process(dt: float) -> void:
 	for tst in toasts:
 		tst.t += dt
 	toasts = toasts.filter(func(tst): return tst.t < 4.0)
-	if title_screen != null:
+	if title_screen != null and reliquary != null:
+		_step_reliquary(dt)
+	elif title_screen != null:
 		title_screen.t += dt
+		if title_screen.t > 0.4 and Input.is_action_just_pressed("dash"):
+			reliquary = {"pick": 0, "t": 0.0, "msg": "", "msg_t": 0.0}
 		if Input.is_action_just_pressed("left"):
 			game.vigil = maxi(0, game.vigil - 1)
 		if Input.is_action_just_pressed("right"):
@@ -179,6 +185,13 @@ func _paint() -> void:
 	canvas.draw_rect(Rect2(bx, 22, bw * hp_show, 14), Color(0.95, 0.7, 0.23, 0.55))
 	canvas.draw_rect(Rect2(bx, 22, bw * hk, 14), Color("#e5383b"))
 	_text("%d / %d HP" % [int(p.hp) * 20, mh * 20], Vector2(bx - 104, 35), 13, Color("#f3ebe0"))
+	# weapon skill meter under the health bar
+	if game.weapon != "":
+		var full := game.skill_meter >= 1.0
+		var pulse := 0.6 + 0.4 * sin(Time.get_ticks_msec() * 0.01) if full else 1.0
+		canvas.draw_rect(Rect2(bx - 2, 42, bw + 4, 8), Color(0, 0, 0, 0.75))
+		canvas.draw_rect(Rect2(bx, 44, bw * game.skill_meter, 4), Color(0.95, 0.7, 0.23, pulse))
+		_text(("%s  ·  L" % RunData.SKILLS[game.weapon].name) if full else RunData.SKILLS[game.weapon].name, Vector2(bx, 64), 10, Color("#f2b43a") if full else Color(0.6, 0.57, 0.54))
 	# depth title
 	var title := "DEPTH %s" % Game.roman(game.depth)
 	_text(title, Vector2(vp.x / 2, 52), 34, Color("#e5383b") if game.depth >= 7 else Color("#f3ebe0"), true)
@@ -211,6 +224,8 @@ func _paint() -> void:
 		_paint_death(vp)
 	if title_screen != null:
 		_paint_title(vp)
+		if reliquary != null:
+			_paint_reliquary(vp)
 	elif scene != null:
 		_paint_scene(vp)
 	elif menu != null:
@@ -246,6 +261,57 @@ func _paint_title(vp: Vector2) -> void:
 	_text(stats + "   ·   ACHIEVEMENTS %d / %d" % [game.achieved.size(), Achievements.LIST.size()], Vector2(mid.x, vp.y - 110), 13, Color(0.6, 0.57, 0.54), true)
 	var blink := 0.5 + 0.5 * sin(t * 4)
 	_text("PRESS %s OR ENTER TO DESCEND" % game.key_label("attack"), Vector2(mid.x, vp.y - 70), 16, Color(0.95, 0.92, 0.88, 0.4 + 0.6 * blink), true)
+	var open := RunData.RELICS.filter(func(r): return not r.id in game.relics).size()
+	_text("%s / RB  THE RELIQUARY  ·  %d TO BUY" % [game.key_label("dash"), open] if open > 0 else "THE RELIQUARY IS COMPLETE", Vector2(mid.x, vp.y - 44), 12, Color("#3fd6c4"), true)
+
+
+func _step_reliquary(dt: float) -> void:
+	var r: Dictionary = reliquary
+	r.t += dt
+	r.msg_t = maxf(0, r.msg_t - dt)
+	var n := RunData.RELICS.size()
+	if Input.is_action_just_pressed("up"):
+		r.pick = (r.pick + n - 1) % n
+	if Input.is_action_just_pressed("down"):
+		r.pick = (r.pick + 1) % n
+	if r.t > 0.25 and (Input.is_action_just_pressed("dash") or Input.is_action_just_pressed("pause") or Input.is_action_just_pressed("back")):
+		reliquary = null
+		return
+	if r.t > 0.25 and game.ok_pressed():
+		var rel: Dictionary = RunData.RELICS[r.pick]
+		if rel.id in game.relics:
+			r.msg = "ALREADY YOURS"
+		elif game.buy_relic(r.pick):
+			r.msg = "%s IS YOURS" % rel.name
+		else:
+			r.msg = "NOT ENOUGH ASH"
+		r.msg_t = 1.6
+
+
+func _paint_reliquary(vp: Vector2) -> void:
+	var r: Dictionary = reliquary
+	canvas.draw_rect(Rect2(Vector2.ZERO, vp), Color(0.02, 0.01, 0.02, 0.95))
+	var mid := vp / 2
+	_text("THE RELIQUARY", Vector2(mid.x, 80), 40, Color("#f3ebe0"), true)
+	_text("BANKED ASH %d  ·  WHAT YOU BUY HERE STAYS FOREVER" % game.bank, Vector2(mid.x, 108), 13, Color("#3fd6c4"), true)
+	var x0 := mid.x - 360
+	for i in RunData.RELICS.size():
+		var rel: Dictionary = RunData.RELICS[i]
+		var y := 140.0 + i * 46
+		var sel: bool = i == r.pick
+		var owned: bool = rel.id in game.relics
+		var can: bool = game.bank >= rel.cost
+		canvas.draw_rect(Rect2(x0, y, 720, 40), Color(0.08, 0.06, 0.09, 1) if sel else Color(0.05, 0.04, 0.06, 1))
+		if sel:
+			canvas.draw_rect(Rect2(x0, y, 720, 40), Color("#f2b43a"), false, 2)
+		var col := Color(0.55, 0.52, 0.5) if owned else (Color("#f3ebe0") if can else Color(0.45, 0.42, 0.4))
+		_text(rel.kind, Vector2(x0 + 14, y + 25), 10, Color("#3fd6c4") if rel.kind == "PERK" else (Color("#f2b43a") if rel.kind == "WEAPON" else Color("#b44dff")))
+		_text(rel.name, Vector2(x0 + 80, y + 18), 15, col)
+		_text(rel.desc, Vector2(x0 + 80, y + 35), 11, Color(0.75, 0.7, 0.66) if not owned else Color(0.5, 0.47, 0.45))
+		_text("OWNED" if owned else "%d ASH" % rel.cost, Vector2(x0 + 650, y + 26), 13, Color("#3fd6c4") if owned else (Color("#f2b43a") if can else Color(0.5, 0.45, 0.4)))
+	if r.msg_t > 0:
+		_text(r.msg, Vector2(mid.x, vp.y - 70), 20, Color("#f2b43a"), true)
+	_text("UP / DOWN  CHOOSE      %s / ENTER  BUY      %s / ESC  BACK" % [game.key_label("attack"), game.key_label("dash")], Vector2(mid.x, vp.y - 30), 12, Color(0.55, 0.5, 0.47), true)
 
 
 ## Souls-like death: a black band fades in and EXTINGUISHED slowly grows in it.
@@ -318,6 +384,25 @@ func _paint_menu(vp: Vector2) -> void:
 	_text(menu.title, Vector2(vp.x / 2, 110), 40, Color("#f3ebe0"), true)
 	_text(menu.sub, Vector2(vp.x / 2, 140), 14, Color(0.6, 0.57, 0.54), true)
 	var n: int = menu.opts.size()
+	var foot := ("WAITING FOR A KEY  ·  ESC CANCELS" if menu.get("locked", false) else "ARROWS  CHOOSE      %s / ENTER / 1-%d  CONFIRM%s" % [game.key_label("attack"), mini(9, menu.opts.size()), "      ESC  BACK" if menu.cancel.is_valid() else ""])
+	if n > 7:
+		# long menus (Controls) are a list: name on the left, value on the right, the picked row's note under the title
+		_text(String(menu.opts[menu.pick].desc), Vector2(vp.x / 2, 166), 14, Color(0.85, 0.8, 0.75), true)
+		var rh := minf(40.0, (vp.y - 250) / n)
+		var lx := vp.x / 2 - 320
+		for i in n:
+			var o: Dictionary = menu.opts[i]
+			var rr := Rect2(lx, 190 + i * rh, 640, rh - 6)
+			var on: bool = i == menu.pick
+			canvas.draw_rect(rr, Color(0.06, 0.05, 0.07, 1))
+			canvas.draw_rect(rr, Color("#f2b43a") if on else Color(0.3, 0.26, 0.25), false, 2.0 if on else 1.0)
+			var ty := rr.position.y + rr.size.y / 2 + 6
+			_text(o.name, Vector2(lx + 16, ty), 16, Color("#f3ebe0") if on else Color(0.7, 0.66, 0.62))
+			var v := String(o.get("value", ""))
+			if v != "":
+				_text(v, Vector2(lx + 624 - font.get_string_size(v, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x, ty), 16, Color("#f2b43a") if on else Color("#f3ebe0"))
+		_text(foot, Vector2(vp.x / 2, vp.y - 26), 13, Color(0.5, 0.47, 0.44), true)
+		return
 	var gap := 26.0 if n <= 4 else 14.0
 	var cw := minf(240.0, (vp.x - 60 - (n - 1) * gap) / n)
 	var x0 := (vp.x - n * cw - (n - 1) * gap) / 2
@@ -340,7 +425,7 @@ func _paint_menu(vp: Vector2) -> void:
 				line = ""
 			line += " " + wd
 		_text(line.strip_edges(), Vector2(r.position.x + cw / 2, y), 15, Color(0.85, 0.8, 0.75), true)
-	_text(("WAITING FOR A KEY  ·  ESC CANCELS" if menu.get("locked", false) else "ARROWS  CHOOSE      %s / ENTER / 1-%d  CONFIRM%s" % [game.key_label("attack"), mini(9, menu.opts.size()), "      ESC  BACK" if menu.cancel.is_valid() else ""]), Vector2(vp.x / 2, 500), 13, Color(0.5, 0.47, 0.44), true)
+	_text(foot, Vector2(vp.x / 2, 500), 13, Color(0.5, 0.47, 0.44), true)
 
 
 func _paint_summary(vp: Vector2) -> void:

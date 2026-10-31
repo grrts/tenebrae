@@ -18,6 +18,7 @@ Two full hands work out of the box: **WASD + Space / J / K** (or the mouse), and
 | Katana (3-hit combo) | J or X. Hold to keep swinging | Left click, aimed at the cursor | X |
 | Slam | Down + attack in the air | | Down + X |
 | Dash (i-frames, cancels attacks) | Shift, K or C | Right click, toward the cursor | RB, RT or B |
+| Weapon skill (when the meter is full) | Q or L | | Y |
 | Menus | Arrows to choose, Enter / attack to confirm, 1-9 to pick, Esc / Backspace to go back | | D-pad, A, B |
 | Pause | Escape or P (also pauses when the window loses focus) | | Start |
 | Switch arena | 1 to 5 | | |
@@ -42,9 +43,11 @@ Feel details: a jump, swing or dash pressed during a dash, slam or hit-stop is b
 
 ## The run
 
-- **Weapon draw:** each run starts with a pick of 1 of 2 weapons (katana, greatsword, spear, twin daggers). The chain sickle unlocks once you have banked 400 ash in total.
+- **Weapon draw:** each run starts with a pick of 1 of 2 weapons (katana, greatsword, spear, twin daggers). The chain sickle is bought in the Reliquary.
 - **Ash:** enemies drop ash that flies to you. It's your run currency and your XP.
+- **Weapon skills:** landing hits fills the gold meter under the HP bar; when it's full, L, Q or Y fires the weapon's skill: Iaido (katana, flash through everything ahead), Earthsplitter (greatsword), Skyward (spear, launch up), Flurry (daggers) and Reap (sickle, drag enemies in).
 - **Rune drafts:** every level-up, pick 1 of 3 runes. Runes change your moves (Updraft, Ember Dash, Heavy Shadow, Second Wind, Requiem and more), and three are cursed. Two runes with the same sigil complete a set: EDGE +15% damage, GALE faster dashes, EMBER more ash per pickup, ECHO wider slams.
+- **The Reliquary:** press Shift, K or RB on the title screen to spend banked ash on permanent unlocks: the chain sickle, four runes for the draft pool, and four starting perks (Second Draw, Ashen Skin, Spare Rune, Ember Flask). All of it lives in `RunData.RELICS`.
 - **Title screen:** shows your banked ash, deepest depth and dawns (wins), and the Vigil picker once you've won.
 - **Vigils:** each win unlocks the next of five harder levels, and each level keeps the ones below it: more enemy health, faster spawns, no hidden candle, shorter braziers, 20 less max HP.
 - **Shade merchant:** opens after each boss. Mend, Temper, or walk on.
