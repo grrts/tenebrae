@@ -1,0 +1,1932 @@
+<title>Tenebrae Playtest</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Barlow:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+  :root { --bg: #070506; --text: #f3ebe0; --muted: #9a9289; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; font: 500 13px "IBM Plex Mono", ui-monospace, monospace; }
+  #cv-demo { width: min(100vw, calc((100vh - 44px) * 1.6)); aspect-ratio: 960 / 600; height: auto; display: block; outline: none; }
+  .keys { padding: 10px 16px; color: var(--muted); text-align: center; letter-spacing: .04em; line-height: 1.6; }
+  .keys b { color: var(--text); font-weight: 600; }
+</style>
+<canvas id="cv-demo" tabindex="0" aria-label="Tenebrae playtest"></canvas>
+<div class="keys"><b>A D</b> move · <b>SPACE</b> jump, double jump, wall jump · <b>J</b> attack (tap for combo) · <b>S + J</b> in air: slam · <b>SHIFT</b> dash · <b>S + SPACE</b> drop · controller works too</div>
+<script>
+(() => {
+/* ---------- input: keyboard + gamepad ---------- */
+const KEYS = { left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'], up: ['KeyW', 'ArrowUp'], down: ['KeyS', 'ArrowDown'],
+  jump: ['Space', 'KeyZ', 'KeyK'], attack: ['KeyJ', 'KeyX'], dash: ['ShiftLeft', 'ShiftRight', 'KeyL', 'KeyC'] };
+const held = new Set(), IN = {}, PR = {}, prevIN = {};
+addEventListener('keydown', e => { if (Object.values(KEYS).flat().includes(e.code)) e.preventDefault(); held.add(e.code); });
+addEventListener('keyup', e => held.delete(e.code));
+addEventListener('blur', () => held.clear());
+function pollInput() {
+  const pad = (navigator.getGamepads ? [...navigator.getGamepads()] : []).find(g => g);
+  const b = i => !!(pad && pad.buttons[i] && pad.buttons[i].pressed), ax = i => pad ? pad.axes[i] || 0 : 0;
+  const now = {
+    left: b(14) || ax(0) < -.4, right: b(15) || ax(0) > .4, up: b(12) || ax(1) < -.5, down: b(13) || ax(1) > .5,
+    jump: b(0), attack: b(2), dash: b(5) || b(7) || b(1) };
+  for (const k in KEYS) { IN[k] = now[k] || KEYS[k].some(c => held.has(c)); PR[k] = IN[k] && !prevIN[k]; prevIN[k] = IN[k]; }
+}
+
+const TAU = Math.PI * 2, PI = Math.PI, S = Math.sin, Co = Math.cos;
+const lerp = (a, b, u) => a + (b - a) * u;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const ease = u => u < .5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+const easeOut = u => 1 - Math.pow(1 - u, 3);
+const rnd = (a, b) => a + Math.random() * (b - a);
+const C = { shade: '#0a0a0d', back: '#26232b', rim: 'rgba(255,128,88,.92)', crimson: '#e5383b', gold: '#f2b43a', cyan: '#3fd6c4', violet: '#b44dff',
+  pink: '#f29aae', band: '#3a6fd0', wood: '#e9c690', steel: '#9aa3ad', hot: '#fff4d6' };
+const dpr = Math.min(window.devicePixelRatio || 1, 2);
+const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const MONO = '"IBM Plex Mono", ui-monospace, monospace';
+const DISP = '"Big Shoulders Display", Impact, sans-serif';
+
+/* ---------- drawing primitives ---------- */
+function cap(ctx, x1, y1, x2, y2, r1, r2) {
+  const th = Math.atan2(y2 - y1, x2 - x1);
+  ctx.beginPath();
+  ctx.arc(x1, y1, r1, th + PI / 2, th + PI * 1.5);
+  ctx.arc(x2, y2, r2, th - PI / 2, th + PI / 2);
+  ctx.closePath(); ctx.fill();
+}
+function circ(ctx, x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); }
+function shadow(ctx, x, y, rx, a = .38) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(1, .2);
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+  g.addColorStop(0, `rgba(25,14,4,${a})`); g.addColorStop(1, 'rgba(25,14,4,0)');
+  ctx.fillStyle = g; circ(ctx, 0, 0, rx); ctx.restore();
+}
+
+/* ---------- the rig ---------- */
+// angles are measured from straight down; positive = towards facing direction
+function rig(P) {
+  const s = P.s || 1, f = P.f || 1, B = P.build || {}, k = B.k || 1;
+  const L = { torso: 52 * s * (B.torso || 1), thigh: 34 * s * (B.leg || 1), shin: 34 * s * (B.leg || 1), ua: 25 * s * (B.arm || 1), fa: 24 * s * (B.arm || 1), head: (B.head || 15) * s };
+  const lean = P.lean || 0, hx = P.x, hy = P.y;
+  const nx = hx + S(lean) * f * L.torso, ny = hy - Co(lean) * L.torso;
+  const sx = hx + S(lean) * f * L.torso * .84, sy = hy - Co(lean) * L.torso * .84;
+  const ht = lean + (P.tilt || 0);
+  const cx = nx + S(ht) * f * (L.head + 2 * s), cy = ny - Co(ht) * (L.head + 2 * s);
+  const shapes = [];
+  const limb = (ox, oy, a, b, l1, l2, r1, r2, r3, p, foot) => {
+    const kx = ox + S(a) * f * l1, ky = oy + Co(a) * l1;
+    const ex = kx + S(a + b) * f * l2, ey = ky + Co(a + b) * l2;
+    shapes.push({ x1: ox, y1: oy, x2: kx, y2: ky, r1, r2, p }, { x1: kx, y1: ky, x2: ex, y2: ey, r1: r2, r2: r3, p });
+    if (foot) shapes.push({ x1: ex, y1: ey, x2: ex + f * 8 * s * (B.foot || 1), y2: ey + 1.5 * s, r1: r3 * 1.05, r2: r3 * .8, p });
+    else shapes.push({ c: 1, x1: ex, y1: ey, r1: r3 * 1.25, p });
+    return { kx, ky, ex, ey, ang: a + b, can: Math.atan2(Co(a + b), S(a + b) * f) };
+  };
+  const J = { hip: [hx, hy], neck: [nx, ny], sh: [sx, sy], head: [cx, cy, L.head], f, s, lean, shapes };
+  J.legB = limb(hx, hy, P.legs[0][0], P.legs[0][1], L.thigh, L.shin, 5.4 * s * k, 4.3 * s * k, 3.1 * s * k, 'B', 1);
+  J.armB = limb(sx, sy, P.arms[0][0], P.arms[0][1], L.ua, L.fa, 4.4 * s * k, 3.3 * s * k, 2.6 * s * k, 'B', 0);
+  shapes.push({ x1: hx, y1: hy, x2: sx, y2: sy, r1: 5.6 * s * k, r2: 7 * s * k * (B.chest || 1), p: 'T' });
+  shapes.push({ x1: sx, y1: sy, x2: nx, y2: ny, r1: 5 * s * k, r2: 3.2 * s * k, p: 'T' });
+  J.legF = limb(hx, hy, P.legs[1][0], P.legs[1][1], L.thigh, L.shin, 5.6 * s * k, 4.5 * s * k, 3.2 * s * k, 'F', 1);
+  J.armF = limb(sx, sy, P.arms[1][0], P.arms[1][1], L.ua, L.fa, 4.6 * s * k, 3.4 * s * k, 2.7 * s * k, 'F', 0);
+  return J;
+}
+function headShape(ctx, J, st) {
+  const [x, y, r] = J.head, f = J.f;
+  if (st.hood) {
+    ctx.beginPath();
+    ctx.moveTo(x - f * r * .5, y - r * 1.75);
+    ctx.quadraticCurveTo(x + f * r * 1.3, y - r * .6, x + f * r * 1.05, y + r * 1.05);
+    ctx.lineTo(x - f * r * 1.25, y + r * 1.2);
+    ctx.quadraticCurveTo(x - f * r * 1.3, y - r * .4, x - f * r * .5, y - r * 1.75);
+    ctx.fill();
+  } else circ(ctx, x, y, r);
+}
+function paint(ctx, J, st = {}) {
+  const s = J.s;
+  const pass = (dx, dy, colB, colF, rimPass) => {
+    ctx.save(); ctx.translate(dx, dy);
+    for (const o of ['B', 'T', 'H', 'F']) {
+      ctx.fillStyle = o === 'B' ? colB : colF;
+      if (o === 'H') { headShape(ctx, J, st); if (st.headExtra && !rimPass) st.headExtra(ctx, J, colF); continue; }
+      for (const sh of J.shapes) if (sh.p === o) sh.c ? circ(ctx, sh.x1, sh.y1, sh.r1) : cap(ctx, sh.x1, sh.y1, sh.x2, sh.y2, sh.r1, sh.r2);
+    }
+    ctx.restore();
+  };
+  if (st.rim !== false) pass(-1.5 * s, -1.4 * s, st.rim || C.rim, st.rim || C.rim, true);
+  pass(0, 0, st.back || C.back, st.body || C.shade, false);
+  if (st.eyes) eyes(ctx, J, st);
+}
+function eyes(ctx, J, st) {
+  const [x, y, r] = J.head, f = J.f, s = J.s;
+  ctx.save(); ctx.fillStyle = st.eyes; ctx.shadowColor = st.eyes; ctx.shadowBlur = (st.glow ?? 12) * s;
+  const ey = y + (st.eyeY ?? .05) * r, ex = x + f * r * .42;
+  const ry = r * (st.slit ? .07 : .13);
+  [[-.34, 0], [.06, 0]].concat(st.third ? [[-.14, -.42]] : []).forEach(([dx, dy]) => {
+    ctx.beginPath(); ctx.ellipse(ex + f * dx * r, ey + dy * r, r * .14, ry, st.slit ? f * .3 : 0, 0, TAU); ctx.fill();
+  });
+  ctx.restore();
+}
+
+/* ---------- props & effects ---------- */
+function scarf(ctx, x, y, t, f, len, s, wind = 1, lift = 0) {
+  ctx.save(); ctx.fillStyle = C.crimson; ctx.shadowColor = 'rgba(229,56,59,.55)'; ctx.shadowBlur = 8 * s;
+  [[1, 0], [.72, 1.9]].forEach(([lm, ph]) => {
+    const n = 16, top = [], bot = [];
+    for (let i = 0; i <= n; i++) {
+      const u = i / n, L = len * lm;
+      const px = x - f * u * L * wind;
+      const py = y + u * L * (.22 - lift) * (1.15 - wind * .5) + S(t * 9 - u * 5 + ph) * u * L * .11 + ph * u * 3 * s;
+      const w = (1 - u * .72) * 5.4 * s;
+      top.push([px, py - w / 2]); bot.push([px, py + w / 2]);
+    }
+    ctx.beginPath(); ctx.moveTo(top[0][0], top[0][1]);
+    top.forEach(p => ctx.lineTo(p[0], p[1]));
+    const e = top[n], eb = bot[n];
+    ctx.lineTo(e[0] - f * 4 * s, (e[1] + eb[1]) / 2); // forked tail
+    for (let i = n; i >= 0; i--) ctx.lineTo(bot[i][0], bot[i][1]);
+    ctx.closePath(); ctx.fill();
+  });
+  ctx.shadowBlur = 0; circ(ctx, x, y, 4.6 * s);
+  ctx.restore();
+}
+function smear(ctx, cx, cy, r, a0, a1, s, alpha = 1, col = C.gold) {
+  if (alpha <= 0) return;
+  const n = 18, ccw = a1 < a0;
+  ctx.save(); ctx.lineCap = 'round'; ctx.shadowColor = col; ctx.shadowBlur = 20 * s; ctx.strokeStyle = col;
+  for (let i = 0; i < n; i++) {
+    const u0 = i / n, u1 = (i + 1) / n;
+    ctx.globalAlpha = alpha * u1 * u1; ctx.lineWidth = (2 + u1 * 15) * s;
+    ctx.beginPath(); ctx.arc(cx, cy, r, lerp(a0, a1, u0), lerp(a0, a1, u1), ccw); ctx.stroke();
+  }
+  ctx.shadowBlur = 0; ctx.globalAlpha = alpha * .9; ctx.strokeStyle = C.hot; ctx.lineWidth = 3.2 * s;
+  ctx.beginPath(); ctx.arc(cx, cy, r, lerp(a0, a1, .5), a1, ccw); ctx.stroke();
+  ctx.restore();
+}
+function emit(P, o) { o.max = o.life; P.push(Object.assign({ vx: 0, vy: 0, g: 0, drag: 0, r: 2, col: '#000', glow: 0, kind: 'dot', a: 1 }, o)); }
+function stepParts(ctx, P, dt) {
+  for (let i = P.length - 1; i >= 0; i--) {
+    const p = P[i]; p.life -= dt;
+    if (p.life <= 0) { P.splice(i, 1); continue; }
+    const dr = Math.max(0, 1 - p.drag * dt);
+    p.vx *= dr; p.vy = p.vy * dr + p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+    if (p.floor && p.y > p.floor) { p.y = p.floor; p.vy *= -.25; p.vx *= .6; }
+    const a = p.life / p.max;
+    ctx.globalAlpha = Math.min(1, a * 1.6) * p.a;
+    ctx.shadowColor = p.col; ctx.shadowBlur = p.glow;
+    if (p.kind === 'streak') {
+      ctx.strokeStyle = p.col; ctx.lineWidth = p.r; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - p.vx * .035, p.y - p.vy * .035); ctx.stroke();
+    } else if (p.kind === 'shred') {
+      ctx.fillStyle = p.col; ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.life * 9 + p.r);
+      ctx.fillRect(-p.r, -p.r * .5, p.r * 2, p.r); ctx.restore();
+    } else {
+      ctx.fillStyle = p.col; circ(ctx, p.x, p.y, p.r * (p.shrink ? a : 1));
+    }
+  }
+  ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+}
+function shadeBurst(P, x, y, s, n = 16, floor) {
+  for (let i = 0; i < n; i++) {
+    const a = rnd(0, TAU), v = rnd(60, 260) * s;
+    emit(P, { x, y, vx: Co(a) * v, vy: S(a) * v - 60 * s, g: 520 * s, drag: 2, r: rnd(1.5, 4.5) * s, col: i % 4 ? '#14070b' : C.crimson, glow: i % 4 ? 0 : 8, life: rnd(.4, .9), floor });
+  }
+}
+function sparks(P, x, y, s, n = 10, col = C.gold) {
+  for (let i = 0; i < n; i++) {
+    const a = rnd(0, TAU), v = rnd(180, 420) * s;
+    emit(P, { x, y, vx: Co(a) * v, vy: S(a) * v, drag: 5, r: rnd(1.5, 2.6) * s, col, glow: 10, kind: 'streak', life: rnd(.18, .38) });
+  }
+}
+
+/* ---------- grain texture ---------- */
+const grain = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 180; const g = c.getContext('2d');
+  const d = g.createImageData(180, 180);
+  for (let i = 0; i < d.data.length; i += 4) { const v = 90 + Math.random() * 165; d.data[i] = v; d.data[i + 1] = v * .96; d.data[i + 2] = v * .9; d.data[i + 3] = Math.random() * 70; }
+  g.putImageData(d, 0, 0); return c;
+})();
+function vignette(W, H, a = .6, lx = W / 2, ly = H / 2) {
+  const c = document.createElement('canvas'); c.width = W * dpr; c.height = H * dpr;
+  const g = c.getContext('2d'); g.scale(dpr, dpr);
+  const v = g.createRadialGradient(lx, ly, Math.min(W, H) * .35, W / 2, H / 2, Math.max(W, H) * .72);
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, `rgba(12,7,2,${a})`);
+  g.fillStyle = v; g.fillRect(0, 0, W, H); return c;
+}
+
+/* ---------- poses ---------- */
+function runPose(ph, amp = 1) {
+  return {
+    legs: [0, 1].map(i => { const q = ph + i * PI; return [S(q) * .82 * amp, -(.28 + 1.4 * Math.max(0, Co(q))) * amp]; }),
+    arms: [0, 1].map(i => { const q = ph + i * PI; return [-S(q) * .95 * amp, 1.45]; })
+  };
+}
+function walkPose(ph, amp = .45) {
+  return { legs: [0, 1].map(i => { const q = ph + i * PI; return [S(q) * amp, -(.12 + .7 * Math.max(0, Co(q)))]; }) };
+}
+
+/* ---------- character painters (shared by plates, demo and key art) ---------- */
+function drawShambler(ctx, x, y, s, t, f = 1, st = {}) {
+  const ph = t * 3.2 + (st.off || 0);
+  const w = walkPose(ph, .42);
+  const sway = S(t * 1.6 + (st.off || 0));
+  const J = rig({ x, y: y - 63 * s + Math.abs(S(ph)) * -2.2 * s, f, s, lean: .55 + sway * .04, tilt: .35, build: { k: .92, chest: .9 },
+    legs: w.legs, arms: [[1.32 + sway * .07, .22], [1.5 - sway * .07, .12]] });
+  paint(ctx, J, Object.assign({ eyes: C.crimson }, st));
+  return J;
+}
+function drawBrute(ctx, x, y, s, t, f = 1, st = {}) {
+  const ph = t * 2.4 + (st.off || 0);
+  const w = walkPose(ph, .36);
+  const J = rig({ x, y: y - 60 * s + Math.abs(S(ph)) * -3 * s, f, s, lean: .22, tilt: .15,
+    build: { k: 1.95, head: 18, chest: 1.45, torso: .92, arm: 1.12, leg: .88, foot: 1.3 },
+    legs: w.legs, arms: [[-.25 + S(ph) * .25, .7], [.3 - S(ph) * .08, .3]] });
+  // club resting over the shoulder, held in the front hand
+  const hx = J.armF.ex, hy = J.armF.ey, ca = f > 0 ? .62 : PI - .62;
+  const club = (col) => {
+    ctx.save(); ctx.translate(hx, hy); ctx.rotate(ca); ctx.fillStyle = col;
+    cap(ctx, -10 * s, 0, 70 * s, 0, 5 * s, 14 * s);
+    ctx.fillStyle = col === C.shade ? '#4b4a52' : col;
+    for (let i = 0; i < 5; i++) { const px = (30 + i * 9) * s, sg = i % 2 ? 1 : -1, rr = (8 + i * 1.3) * s;
+      ctx.beginPath(); ctx.moveTo(px - 3 * s, sg * rr); ctx.lineTo(px, sg * (rr + 8 * s)); ctx.lineTo(px + 3 * s, sg * rr); ctx.fill(); }
+    ctx.restore();
+  };
+  const horns = (c2, J2, col) => {
+    const [hx2, hy2, r] = J2.head; c2.fillStyle = col;
+    [[-.55, -1], [.4, -1]].forEach(([dx]) => {
+      c2.beginPath(); c2.moveTo(hx2 + dx * r * J2.f - 5 * s, hy2 - r * .7);
+      c2.quadraticCurveTo(hx2 + dx * r * J2.f - 9 * s, hy2 - r * 1.9, hx2 + dx * r * J2.f + 2 * s * J2.f, hy2 - r * 2.05);
+      c2.quadraticCurveTo(hx2 + dx * r * J2.f, hy2 - r * 1.3, hx2 + dx * r * J2.f + 6 * s, hy2 - r * .6); c2.fill();
+    });
+  };
+  club('rgba(255,196,120,.8)'); // rim
+  paint(ctx, J, Object.assign({ eyes: C.crimson, slit: 1, headExtra: horns }, st));
+  club(C.shade);
+  return J;
+}
+function drawBat(ctx, x, y, s, t, f = 1, st = {}) {
+  const w = S(t * 15 + (st.off || 0)) * .8;
+  const col = st.body || C.shade;
+  ctx.save(); ctx.fillStyle = col;
+  for (const side of [-1, 1]) {
+    ctx.save(); ctx.translate(x + side * 9 * s, y - 3 * s); ctx.rotate(side * w); ctx.scale(side * s, s);
+    ctx.beginPath();
+    const pts = [[0, -6], [16, -22], [38, -34], [58, -26], [72, -10], [60, -8], [56, 4], [44, -3], [36, 9], [22, 0], [10, 8], [0, 6]];
+    ctx.moveTo(pts[0][0], pts[0][1]); pts.forEach(p => ctx.lineTo(p[0], p[1])); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,196,120,.35)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(4, -2); ctx.lineTo(38, -30); ctx.moveTo(14, -4); ctx.lineTo(58, -24); ctx.moveTo(18, -2); ctx.lineTo(44, -3); ctx.stroke();
+    ctx.restore();
+  }
+  ctx.beginPath();
+  for (let i = 0; i <= 26; i++) { const a = i / 26 * TAU, rr = (i % 2 ? 19 : 14.5) * s * (1 + S(i * 7.3) * .1); const px = x + Co(a) * rr, py = y + S(a) * rr * .92; i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+  ctx.fill();
+  ctx.beginPath(); ctx.moveTo(x - 10 * s, y - 12 * s); ctx.lineTo(x - 13 * s, y - 28 * s); ctx.lineTo(x - 3 * s, y - 15 * s);
+  ctx.moveTo(x + 10 * s, y - 12 * s); ctx.lineTo(x + 13 * s, y - 28 * s); ctx.lineTo(x + 3 * s, y - 15 * s); ctx.fill();
+  ctx.fillStyle = C.crimson; ctx.shadowColor = C.crimson; ctx.shadowBlur = 12 * s;
+  ctx.beginPath(); ctx.ellipse(x - 6 * s, y - 2 * s, 4 * s, 3 * s, .3, 0, TAU); ctx.ellipse(x + 6 * s, y - 2 * s, 4 * s, 3 * s, -.3, 0, TAU); ctx.fill();
+  ctx.shadowBlur = 0; ctx.fillStyle = '#f3ead6';
+  ctx.beginPath(); ctx.moveTo(x - 5 * s, y + 7 * s); ctx.lineTo(x - 3 * s, y + 12 * s); ctx.lineTo(x - 1 * s, y + 7 * s);
+  ctx.moveTo(x + 1 * s, y + 7 * s); ctx.lineTo(x + 3 * s, y + 12 * s); ctx.lineTo(x + 5 * s, y + 7 * s); ctx.fill();
+  ctx.restore();
+}
+function drawPlayer(ctx, J, t, wind = 1, lift = 0) {
+  scarf(ctx, J.neck[0] - J.f * 2 * J.s, J.neck[1] + 3 * J.s, t, J.f, 84 * J.s, J.s, wind, lift);
+  paint(ctx, J);
+}
+
+/* draw a group at reduced opacity without overlapping limbs showing through */
+/* ---------- dark stages ---------- */
+function stageBg(W, H, o = {}) {
+  const c = document.createElement('canvas'); c.width = W * dpr; c.height = H * dpr;
+  const g = c.getContext('2d'); g.scale(dpr, dpr);
+  const lx = o.lx ?? W * .5, ly = o.ly ?? H * .45, hue = (o.glow || [214, 86, 60]).join(',');
+  const base = g.createLinearGradient(0, 0, 0, H); base.addColorStop(0, '#06060a'); base.addColorStop(1, '#100a0c');
+  g.fillStyle = base; g.fillRect(0, 0, W, H);
+  const gr = g.createRadialGradient(lx, ly, 0, lx, ly, Math.max(W, H) * (o.spread || .62));
+  const I = o.int ?? 1; gr.addColorStop(0, `rgba(${hue},${.9 * I})`); gr.addColorStop(.22, `rgba(${hue},${.45 * I})`); gr.addColorStop(.55, `rgba(${hue},${.1 * I})`); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  if (o.moon) { const [mx, my, mr] = o.moon; g.save(); g.shadowColor = 'rgba(255,90,60,.9)'; g.shadowBlur = mr * .9;
+    const mg = g.createRadialGradient(mx - mr * .25, my - mr * .25, mr * .1, mx, my, mr); mg.addColorStop(0, '#ffd9b8'); mg.addColorStop(.6, '#f08a64'); mg.addColorStop(1, '#c2433a');
+    g.fillStyle = mg; circ(g, mx, my, mr); g.restore();
+    g.fillStyle = 'rgba(120,30,30,.18)'; circ(g, mx + mr * .3, my - mr * .2, mr * .18); circ(g, mx - mr * .35, my + mr * .3, mr * .12); }
+  if (o.spires !== false) {
+    const hz = o.horizon ?? H * .8;
+    [['rgba(40,16,20,.75)', .55, 0], ['rgba(16,8,11,.95)', 1, 1]].forEach(([col, hs, layer]) => {
+      g.fillStyle = col; let x = -20;
+      while (x < W + 20) { const w = rnd(10, 34), h = rnd(.12, .42) * H * hs + (layer ? 0 : H * .08);
+        g.fillRect(x, hz - h + layer * 30, w, H); g.beginPath(); g.moveTo(x - 3, hz - h + layer * 30); g.lineTo(x + w / 2, hz - h - w * 1.4 + layer * 30); g.lineTo(x + w + 3, hz - h + layer * 30); g.fill();
+        if (Math.random() < .3) g.fillRect(x - 6, hz - h * .55 + layer * 30, w + 12, 4);
+        x += w + rnd(8, 60); }
+    });
+  }
+  const fog = g.createLinearGradient(0, H * .5, 0, H); fog.addColorStop(0, `rgba(${hue},0)`); fog.addColorStop(.7, `rgba(${hue},.12)`); fog.addColorStop(1, 'rgba(0,0,0,.35)');
+  g.fillStyle = fog; g.fillRect(0, 0, W, H);
+  g.globalCompositeOperation = 'overlay'; g.globalAlpha = .3; g.fillStyle = g.createPattern(grain, 'repeat'); g.fillRect(0, 0, W, H);
+  g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+  const v = g.createRadialGradient(lx, ly, Math.min(W, H) * .25, W / 2, H / 2, Math.max(W, H) * .75);
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, `rgba(0,0,0,${o.vig ?? .8})`); g.fillStyle = v; g.fillRect(0, 0, W, H);
+  return c;
+}
+function slab(ctx, x, y, w, h, rim = 'rgba(255,128,88,.9)') {
+  const g = ctx.createLinearGradient(0, y, 0, y + Math.min(h, 70)); g.addColorStop(0, '#1c161b'); g.addColorStop(1, '#070609');
+  ctx.fillStyle = g; ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = 'rgba(255,255,255,.045)'; ctx.lineWidth = 1;
+  for (let i = 0; i * 22 < Math.min(h, 160); i++) { const yy = y + 8 + i * 22; ctx.beginPath(); ctx.moveTo(x, yy); ctx.lineTo(x + w, yy);
+    for (let xx = x + (i % 2 ? 22 : 48); xx < x + w; xx += 58) { ctx.moveTo(xx, yy); ctx.lineTo(xx, Math.min(yy + 22, y + h)); } ctx.stroke(); }
+  ctx.save(); ctx.fillStyle = rim; ctx.shadowColor = rim; ctx.shadowBlur = 10; ctx.fillRect(x, y - 1, w, 2); ctx.restore();
+}
+function tide(ctx, x0, x1, y, t, bottom) {
+  const wy = x => y + S(x * .05 + t * 3) * 2.5 + S(x * .021 - t * 2) * 2;
+  ctx.fillStyle = '#030304'; ctx.beginPath(); ctx.moveTo(x0, bottom);
+  for (let x = x0; x <= x1 + 8; x += 8) ctx.lineTo(x, wy(x));
+  ctx.lineTo(x1 + 8, bottom); ctx.closePath(); ctx.fill();
+  ctx.save(); ctx.strokeStyle = 'rgba(229,56,59,.55)'; ctx.shadowColor = C.crimson; ctx.shadowBlur = 8; ctx.lineWidth = 1.5; ctx.beginPath();
+  for (let x = x0; x <= x1 + 8; x += 8) x === x0 ? ctx.moveTo(x, wy(x)) : ctx.lineTo(x, wy(x));
+  ctx.stroke(); ctx.restore();
+}
+const lerpPose = (A, B, k) => A.map((l, i) => [lerp(l[0], B[i][0], k), lerp(l[1], B[i][1], k)]);
+function rotAbout(ctx, cx, cy, a, fn) { ctx.save(); ctx.translate(cx, cy); ctx.rotate(a); ctx.translate(-cx, -cy); fn(); ctx.restore(); }
+
+/* ---------- flow: weapon trail ribbons and afterimages ---------- */
+function ribbon(ctx, tr, w, dt, col = '255,176,96', max = .17) {
+  if (w) tr.unshift({ bx: w.bx, by: w.by, tx: w.tx, ty: w.ty, a: 0 });
+  for (const q of tr) q.a += dt;
+  while (tr.length && tr[tr.length - 1].a > max) tr.pop();
+  if (tr.length > 40) tr.length = 40;
+  if (tr.length < 2) return;
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < tr.length - 1; i++) {
+    const p0 = tr[i], p1 = tr[i + 1], al = Math.max(0, 1 - p1.a / max) * .32;
+    ctx.fillStyle = `rgba(${col},${al})`;
+    ctx.beginPath(); ctx.moveTo(p0.bx, p0.by); ctx.lineTo(p0.tx, p0.ty); ctx.lineTo(p1.tx, p1.ty); ctx.lineTo(p1.bx, p1.by); ctx.closePath(); ctx.fill();
+  }
+  ctx.strokeStyle = 'rgba(255,236,205,.75)'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.beginPath();
+  let started = false;
+  for (const q of tr) { if (q.a > max * .55) break; started ? ctx.lineTo(q.tx, q.ty) : ctx.moveTo(q.tx, q.ty); started = true; }
+  ctx.stroke(); ctx.restore();
+}
+function ghosts(ctx, buf, J, dt, o = {}) {
+  const every = o.every ?? .03, life = o.life ?? .2;
+  buf.acc = (buf.acc || 0) + dt; buf.list = buf.list || [];
+  if (J && buf.acc >= every) { buf.acc = 0; buf.list.unshift({ sh: J.shapes, hd: J.head.slice(), a: life }); }
+  for (const g of buf.list) g.a -= dt;
+  buf.list = buf.list.filter(g => g.a > 0);
+  ctx.save(); ctx.fillStyle = o.col || '#a3313a';
+  for (const g of buf.list) { ctx.globalAlpha = (g.a / life) * (o.alpha ?? .3);
+    for (const sh of g.sh) sh.c ? circ(ctx, sh.x1, sh.y1, sh.r1) : cap(ctx, sh.x1, sh.y1, sh.x2, sh.y2, sh.r1, sh.r2);
+    circ(ctx, g.hd[0], g.hd[1], g.hd[2]); }
+  ctx.restore();
+}
+
+/* ---------- weapons ---------- */
+const WLEN = { katana: 66, greatsword: 94, spear: 100, daggers: 38, sickle: 52 };
+function blade(ctx, x, y, ang, kind, sc, glow = 0) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.scale(sc, sc);
+  const steel = ctx.createLinearGradient(0, -6, 0, 6); steel.addColorStop(0, '#f4f6f9'); steel.addColorStop(.45, '#b3bbc6'); steel.addColorStop(1, '#4a525d');
+  const lit = () => { if (glow) { ctx.shadowColor = 'rgba(255,170,90,.95)'; ctx.shadowBlur = 12 * glow; } }, dim = () => { ctx.shadowBlur = 0; };
+  const grip = (x0, x1, w) => { ctx.fillStyle = '#17121a'; ctx.fillRect(x0, -w, x1 - x0, w * 2); ctx.fillStyle = C.crimson;
+    for (let i = x0 + 1; i < x1 - 3; i += 5) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + 2.5, -w * .85); ctx.lineTo(i + 5, 0); ctx.lineTo(i + 2.5, w * .85); ctx.fill(); } };
+  if (kind === 'katana') {
+    grip(-18, 4, 2.6);
+    ctx.fillStyle = C.gold; ctx.beginPath(); ctx.ellipse(5.5, 0, 2.2, 6.5, 0, 0, TAU); ctx.fill();
+    lit(); ctx.fillStyle = steel; ctx.beginPath(); ctx.moveTo(7.5, -2.6); ctx.quadraticCurveTo(38, -5.4, 66, -3); ctx.lineTo(61, .6); ctx.quadraticCurveTo(38, -.6, 7.5, 2.4); ctx.closePath(); ctx.fill(); dim();
+    ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = .9; ctx.beginPath(); ctx.moveTo(10, 1.3); ctx.quadraticCurveTo(38, -1.2, 61, -.4); ctx.stroke();
+  } else if (kind === 'greatsword') {
+    grip(-17, 3, 2.8); ctx.fillStyle = C.gold; circ(ctx, -19, 0, 3.6); ctx.fillRect(3, -12, 4.5, 24);
+    lit(); ctx.fillStyle = steel; ctx.beginPath(); ctx.moveTo(8, -6.5); ctx.lineTo(84, -5.5); ctx.lineTo(94, 0); ctx.lineTo(84, 5.5); ctx.lineTo(8, 6.5); ctx.closePath(); ctx.fill(); dim();
+    ctx.fillStyle = 'rgba(30,34,40,.7)'; ctx.fillRect(12, -1.2, 58, 2.4);
+    ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = .9; ctx.beginPath(); ctx.moveTo(10, -5.6); ctx.lineTo(84, -4.8); ctx.stroke();
+  } else if (kind === 'spear') {
+    ctx.fillStyle = '#2b1f1c'; cap(ctx, -48, 0, 74, 0, 2.3, 2.3);
+    ctx.fillStyle = C.gold; ctx.fillRect(-2, -3, 4, 6); ctx.fillRect(70, -3.2, 5, 6.4);
+    ctx.strokeStyle = C.crimson; ctx.lineWidth = 1.6; ctx.beginPath(); for (let i = 0; i < 4; i++) { ctx.moveTo(72, 2); ctx.lineTo(64 - i * 2, 8 + i * 2.5); } ctx.stroke();
+    lit(); ctx.fillStyle = steel; ctx.beginPath(); ctx.moveTo(74, -2); ctx.quadraticCurveTo(84, -7.5, 100, 0); ctx.quadraticCurveTo(84, 7.5, 74, 2); ctx.closePath(); ctx.fill(); dim();
+  } else if (kind === 'daggers') {
+    grip(-11, 1, 2.2); ctx.fillStyle = C.gold; ctx.fillRect(1, -5.5, 3, 11);
+    lit(); ctx.fillStyle = steel; ctx.beginPath(); ctx.moveTo(4, -2.6); ctx.quadraticCurveTo(22, -4.4, 38, -1.5); ctx.lineTo(36, .5); ctx.quadraticCurveTo(22, 1.5, 4, 2.6); ctx.closePath(); ctx.fill(); dim();
+  } else if (kind === 'sickle') {
+    ctx.strokeStyle = '#5b5f68'; ctx.lineWidth = 1.6; for (let i = 0; i < 6; i++) { ctx.beginPath(); ctx.ellipse(-16 - i * 5.5, S(i * .9) * 1.5 + i * .8, 3, 1.8, 0, 0, TAU); ctx.stroke(); }
+    grip(-12, 12, 2.4); ctx.fillStyle = C.gold; ctx.fillRect(11, -3.5, 3, 7);
+    lit(); ctx.fillStyle = steel; ctx.beginPath(); ctx.moveTo(13, -2.5); ctx.quadraticCurveTo(42, -10, 50, -34); ctx.quadraticCurveTo(52, -10, 15, 3); ctx.closePath(); ctx.fill(); dim();
+  }
+  ctx.restore();
+  const cs = Math.cos(ang), sn = Math.sin(ang), W2 = (lx, ly) => [x + (cs * lx - sn * ly) * sc, y + (sn * lx + cs * ly) * sc];
+  const [tx, ty] = kind === 'sickle' ? W2(50, -34) : W2(WLEN[kind] || 60, 0), [bx, by] = W2((WLEN[kind] || 60) * .58, 0);
+  return { bx, by, tx, ty };
+}
+
+/* ---------- Hexer (caster) ---------- */
+function drawHexer(ctx, x, y, s, t, f = 1, st = {}) {
+  const fl = S(t * 1.8) * 3 * s;
+  const J = rig({ x, y: y - 66 * s + fl, f, s, lean: -.04, tilt: .08, build: { k: .78 }, legs: [[-.12, 0], [.14, -.08]], arms: [[-.3, .4], [.78, .95]] });
+  const [sx, sy] = J.sh, hem = i => S(t * 4.5 + i * 1.3) * 5 * s;
+  const cloak = (col, dx, dy) => { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(sx - 13 * s * f + dx, sy - 4 * s + dy); ctx.lineTo(sx + 12 * s * f + dx, sy - 4 * s + dy);
+    ctx.lineTo(x + 32 * s * f + dx, y - 20 * s + hem(0) + dy + fl); ctx.lineTo(x + 16 * s * f + dx, y - 11 * s + hem(1) + dy + fl); ctx.lineTo(x + 2 * s * f + dx, y - 22 * s + hem(2) + dy + fl);
+    ctx.lineTo(x - 14 * s * f + dx, y - 9 * s + hem(3) + dy + fl); ctx.lineTo(x - 36 * s * f + dx, y - 18 * s + hem(4) + dy + fl); ctx.closePath(); ctx.fill(); };
+  if (st.rim !== false) cloak(C.rim, -1.8 * s, -1.6 * s);
+  paint(ctx, J, Object.assign({ hood: 1, eyes: C.violet, eyeY: .2 }, st));
+  cloak(st.body || C.shade, 0, 0);
+  const hx = J.armF.ex, hy = J.armF.ey;
+  ctx.fillStyle = st.body || C.shade; cap(ctx, hx + 2 * s * f, hy - 60 * s, hx - 4 * s * f, hy + 50 * s, 2.6 * s, 3.2 * s);
+  const ox = hx + 3 * s * f, oy = hy - 68 * s, pul = 1 + S(t * 5) * .12;
+  ctx.save(); ctx.shadowColor = C.violet; ctx.shadowBlur = 22 * s; ctx.fillStyle = C.violet; circ(ctx, ox, oy, 8 * s * pul); ctx.shadowBlur = 0; ctx.fillStyle = '#f4dcff'; circ(ctx, ox - 1.6 * s, oy - 1.6 * s, 3.2 * s); ctx.restore();
+  for (let i = 0; i < 3; i++) { const a = t * 3 + i * TAU / 3; ctx.fillStyle = '#1a0d22'; circ(ctx, ox + Co(a) * 16 * s, oy + S(a) * 7 * s, 2.8 * s); }
+  return { J, ox, oy };
+}
+
+/* draw a group at reduced opacity without overlapping limbs showing through */
+const layerC = document.createElement('canvas'), layerX = layerC.getContext('2d');
+function layer(ctx, W, H, alpha, fn) {
+  const w = Math.round(W * dpr), h = Math.round(H * dpr);
+  if (layerC.width !== w || layerC.height !== h) { layerC.width = w; layerC.height = h; }
+  layerX.setTransform(1, 0, 0, 1, 0, 0); layerX.clearRect(0, 0, w, h); layerX.setTransform(dpr, 0, 0, dpr, 0, 0);
+  fn(layerX);
+  ctx.save(); ctx.globalAlpha = alpha; ctx.drawImage(layerC, 0, 0, W, H); ctx.restore();
+}
+
+/* ---------- registry ---------- */
+const R = [];
+function mount(id, W, H, fn, init) {
+  const cv = document.getElementById(id); if (!cv) return;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  R.push({ cv, ctx: cv.getContext('2d'), W, H, fn, vis: true, t: 0, st: init ? init(W, H) : {} });
+}
+const PW = 320, PH = 300, GY = 262;
+const plateBg = (o = {}) => stageBg(PW, PH, Object.assign({ lx: PW * .5, ly: PH * .5, horizon: GY + 4 }, o));
+const floorSlab = ctx => slab(ctx, -10, GY, PW + 20, PH - GY + 10);
+const embers = (st, dt, n = 4, W = PW, H = PH) => { if (Math.random() < dt * n) emit(st.P, { x: rnd(0, W), y: H + 4, vx: rnd(-12, 12), vy: rnd(-60, -25), r: rnd(.8, 1.8), col: C.ember || '#ff7f50', glow: 8, life: rnd(2, 4), a: .9 }); };
+C.ember = '#ff8a5c';
+
+mount('cv-idle', PW, PH, (ctx, t, dt, r) => {
+  const st = r.st; ctx.drawImage(st.bg, 0, 0, PW, PH); floorSlab(ctx);
+  const b = S(t * 2.2);
+  const J = rig({ x: 150, y: GY - 84 + b * 1.4, f: 1, s: 1.3, lean: .06, tilt: -.05 + b * .02, legs: [[-.24, .1], [.28, -.18]], arms: [[-.2, .34], [.42 + b * .04, .7]] });
+  drawPlayer(ctx, J, t * .7, .85 + S(t * .9) * .15);
+  const w = blade(ctx, J.armF.ex, J.armF.ey, 1.05 + b * .03, 'katana', 1.05, .4);
+  ribbon(ctx, st.tr, w, dt, '255,176,96', .3);
+  embers(st, dt); stepParts(ctx, st.P, dt);
+}, () => ({ bg: plateBg(), P: [], tr: [] }));
+
+mount('cv-run', PW, PH, (ctx, t, dt, r) => {
+  const st = r.st; ctx.drawImage(st.bg, 0, 0, PW, PH); floorSlab(ctx);
+  ctx.strokeStyle = 'rgba(255,128,88,.16)'; ctx.lineCap = 'round';
+  for (let i = 0; i < 5; i++) { ctx.lineWidth = 1 + i % 2; const x = ((i * 97 - t * 700) % 420 + 420) % 420 - 60, y = 70 + i * 34; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 70, y); ctx.stroke(); }
+  const ph = t * 10.5, p = runPose(ph);
+  const J = rig({ x: 166, y: GY - 80 + Co(ph * 2) * 3, f: 1, s: 1.3, lean: .32, tilt: -.12, legs: p.legs, arms: p.arms });
+  ghosts(ctx, st.gh, J, dt, { every: .035, life: .18, alpha: .28 });
+  drawPlayer(ctx, J, t * 1.6, 1.2);
+  const w = blade(ctx, J.armF.ex, J.armF.ey, J.armF.can + .9, 'katana', 1.05, .5);
+  ribbon(ctx, st.tr, w, dt);
+  const step = Math.floor(ph / PI);
+  if (step !== st.step) { st.step = step; const foot = step % 2 ? J.legF : J.legB;
+    for (let i = 0; i < 6; i++) emit(st.P, { x: foot.ex, y: GY - 2, vx: rnd(-170, -40), vy: rnd(-50, -10), drag: 3, r: rnd(3, 7), col: 'rgba(170,120,105,.35)', life: rnd(.35, .6), shrink: 1 }); }
+  stepParts(ctx, st.P, dt);
+}, () => ({ bg: plateBg(), P: [], step: 0, gh: {}, tr: [] }));
+
+mount('cv-attack', PW, PH, (ctx, t, dt, r) => {
+  const st = r.st; ctx.drawImage(st.bg, 0, 0, PW, PH); floorSlab(ctx);
+  const T = 1.5, u = (t % T) / T, cyc = Math.floor(t / T);
+  let a, lean;
+  if (u < .34) { const k = ease(u / .34); a = lerp(.45, -2.55, k); lean = lerp(.12, -.12, k); }
+  else if (u < .43) { const k = easeOut((u - .34) / .09); a = lerp(-2.55, 1.85, k); lean = lerp(-.12, .42, k); }
+  else { const k = ease((u - .43) / .57); a = lerp(1.85, .45, k); lean = lerp(.42, .12, k); }
+  const since = u - .4, kb = since > 0 ? easeOut(Math.min(1, since * 4)) * 30 : 0;
+  ctx.save(); if (since > 0 && since < .5) ctx.globalAlpha = 1 - Math.max(0, since - .25) * 2.5;
+  drawShambler(ctx, 252 + kb, GY, 1.0, t * .6, -1, since > 0 && since < .07 ? { body: '#ffe6d6', back: '#ffe6d6', rim: false } : {});
+  ctx.restore();
+  const J = rig({ x: 112, y: GY - 74, f: 1, s: 1.3, lean, tilt: -.1, legs: [[-.62, -.05], [.72, -.62]], arms: [[-.6 + lean, 1.2], [a, .18]] });
+  if (u > .3 && u < .5) ghosts(ctx, st.gh, J, dt, { every: .02, life: .14, alpha: .35 }); else ghosts(ctx, st.gh, null, dt);
+  drawPlayer(ctx, J, t * 1.4, 1);
+  const w = blade(ctx, J.armF.ex, J.armF.ey, J.armF.can, 'katana', 1.2, u > .3 && u < .5 ? 1.4 : .5);
+  ribbon(ctx, st.tr, w, dt, '255,176,96', .2);
+  if (st.cyc !== cyc && u > .4) { st.cyc = cyc; shadeBurst(st.P, 250, GY - 70, 1, 26, GY); sparks(st.P, 236, GY - 74, 1, 16); }
+  stepParts(ctx, st.P, dt);
+  if (since > 0 && since < .5) { ctx.save(); ctx.font = `700 22px ${MONO}`; ctx.textAlign = 'center'; ctx.lineWidth = 4; ctx.strokeStyle = C.shade; ctx.fillStyle = C.gold;
+    ctx.globalAlpha = 1 - since * 2; const y = GY - 160 - since * 60; ctx.strokeText('38', 262 + kb, y); ctx.fillText('38', 262 + kb, y); ctx.restore(); }
+}, () => ({ bg: plateBg(), P: [], cyc: -1, gh: {}, tr: [] }));
+
+mount('cv-dash', PW, PH, (ctx, t, dt, r) => {
+  const st = r.st; ctx.drawImage(st.bg, 0, 0, PW, PH); floorSlab(ctx);
+  ctx.strokeStyle = 'rgba(255,128,88,.2)'; ctx.lineCap = 'round';
+  for (let i = 0; i < 9; i++) { ctx.lineWidth = 1 + (i % 3); const x = ((i * 83 - t * 1400) % 480 + 480) % 480 - 80; const y = 50 + i * 22; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 70 + (i % 4) * 20, y); ctx.stroke(); }
+  const bob = S(t * 6) * 3;
+  const pose = { f: 1, s: 1.25, lean: .78, tilt: -.25, legs: [[-.95, -1.25], [.55, -1.75]], arms: [[-1.95, .35], [-1.6, .25]] };
+  [[-120, .1], [-90, .16], [-60, .26], [-30, .4]].forEach(([dx, al]) => {
+    const J = rig(Object.assign({}, pose, { x: 186 + dx, y: GY - 98 + bob }));
+    layer(ctx, PW, PH, al, c => paint(c, J, { body: C.crimson, back: C.crimson, rim: false }));
+  });
+  const J = rig(Object.assign({}, pose, { x: 186, y: GY - 98 + bob }));
+  drawPlayer(ctx, J, t * 2.2, 1.3, .2);
+  const w = blade(ctx, J.armF.ex, J.armF.ey, PI - .15, 'katana', 1.0, .6);
+  st.tr.forEach(q => { q.bx -= dt * 900; q.tx -= dt * 900; }); ribbon(ctx, st.tr, w, dt, '229,56,59', .14);
+  if (Math.random() < dt * 30) emit(st.P, { x: J.hip[0] - 20, y: J.hip[1] + rnd(-40, 30), vx: rnd(-500, -300), vy: 0, r: 2, col: C.crimson, glow: 6, kind: 'streak', life: .25, a: .7 });
+  stepParts(ctx, st.P, dt);
+}, () => ({ bg: plateBg(), P: [], tr: [] }));
+
+mount('cv-djump', PW, PH, (ctx, t, dt, r) => {
+  const st = r.st; ctx.drawImage(st.bg, 0, 0, PW, PH);
+  const L1 = GY - 18, L2 = GY - 50, s = 1.1;
+  tide(ctx, 0, PW, GY + 8, t, PH);
+  slab(ctx, -10, L1, 112, PH); slab(ctx, 226, L2, 110, PH);
+  const T = 1.8, u = (t % T) / T, cyc = Math.floor(t / T);
+  let x = lerp(46, 266, clamp(u / .8, 0, 1)), feet, rot = 0, legs, arms, lean = .2;
+  if (u < .34) { const k = u / .34; feet = L1 - 82 * S(PI * k * .75); legs = [[-.45, -1.1], [.85, -1.5]]; arms = [[-1.3, .9], [1.9, .5]]; }
+  else if (u < .8) { const k = (u - .34) / .46; feet = lerp(L1 - 58, L2, k) - 4 * 34 * k * (1 - k);
+    rot = ease(clamp(k / .58, 0, 1)) * TAU;
+    const m = clamp((k - .5) / .25, 0, 1);
+    legs = lerpPose([[.25, -2.05], [1.2, -2.25]], [[-.3, -.45], [.5, -.9]], m); arms = lerpPose([[1.0, 1.2], [.2, .1]], [[-1.6, .4], [1.3, .5]], m); lean = lerp(.4, .15, m);
+    if (st.puff !== cyc) { st.puff = cyc; st.ring = 0; st.ringX = x; st.ringY = feet;
+      for (let i = 0; i < 18; i++) { const a = rnd(0, TAU), v = rnd(60, 150); emit(st.P, { x, y: feet + 4, vx: Co(a) * v, vy: S(a) * v * .4 + 30, drag: 3, r: rnd(3, 6), col: i % 3 ? '#1b0c10' : C.crimson, glow: i % 3 ? 0 : 6, life: rnd(.4, .7), shrink: 1 }); } } }
+  else { const k = (u - .8) / .2, c = 1 - easeOut(k); feet = L2;
+    legs = [[-.3 - .5 * c, -.3 - 1.3 * c], [.3 + .8 * c, -.35 - 1.5 * c]]; arms = [[-1.4, .4 + .4 * c], [1.1, .5]]; lean = .15 + .3 * c;
+    if (st.land !== cyc) { st.land = cyc; for (let i = 0; i < 8; i++) emit(st.P, { x: x + rnd(-10, 10), y: L2 - 2, vx: rnd(-90, 90), vy: rnd(-50, -10), drag: 3, r: rnd(3, 6), col: 'rgba(170,120,105,.35)', life: .5, shrink: 1 }); } }
+  const crouch = u >= .8 ? (1 - easeOut((u - .8) / .2)) * 22 : 0;
+  if (st.ring != null) { st.ring += dt; const k = st.ring / .4; if (k < 1) { ctx.save(); ctx.translate(st.ringX, st.ringY + 4); ctx.scale(1, .3);
+    ctx.strokeStyle = `rgba(229,56,59,${.8 * (1 - k)})`; ctx.shadowColor = C.crimson; ctx.shadowBlur = 10; ctx.lineWidth = 5 * (1 - k) + 1; ctx.beginPath(); ctx.arc(0, 0, 14 + k * 50, 0, TAU); ctx.stroke(); ctx.restore(); } }
+  const hipY = feet - 76 + crouch;
+  const J = rig({ x, y: hipY, f: 1, s, lean, tilt: -.1, legs, arms });
+  let w;
+  rotAbout(ctx, x, hipY - 18, rot, () => { drawPlayer(ctx, J, t * 1.8, 1, .1); });
+  // compute blade in rotated space, then map to screen so the trail follows the flip
+  { const cs = Co(rot), sn = S(rot), cx = x, cy = hipY - 18, M = (px, py) => [cx + (px - cx) * cs - (py - cy) * sn, cy + (px - cx) * sn + (py - cy) * cs];
+    const [hx, hy] = M(J.armF.ex, J.armF.ey); w = blade(ctx, hx, hy, J.armF.can + rot, 'katana', .95, rot ? 1.2 : .5); }
+  ribbon(ctx, st.tr, w, dt, '255,176,96', .26);
+  stepParts(ctx, st.P, dt);
+}, () => ({ bg: plateBg({ ly: PH * .4 }), P: [], tr: [] }));
+
+mount('cv-wall', PW, PH, (ctx, t, dt, r) => {
+  const st = r.st; ctx.drawImage(st.bg, 0, 0, PW, PH);
+  tide(ctx, 0, PW, GY + 14, t, PH);
+  slab(ctx, -10, -10, 72, PH + 20); slab(ctx, 258, -10, 72, PH + 20);
+  ctx.fillStyle = 'rgba(255,128,88,.5)'; ctx.fillRect(61, 0, 1.5, PH); ctx.fillRect(257.5, 0, 1.5, PH);
+  const s = 1.1, Y0 = 238, T = 1.5, u = (t % T) / T;
+  const side = u < .5 ? 1 : -1, k = (u % .5) / .5, half = Math.floor(t / (T / 2));
+  const wx = side > 0 ? 245 : 75, ox = side > 0 ? 75 : 245, f = -side;
+  let x, feet, legs, arms, lean, sliding = k < .38;
+  if (sliding) { const kk = k / .38; x = wx; feet = Y0 + 18 * kk; legs = [[-.55, -.95], [.3, -1.25]]; arms = [[-1.55, .25], [.6, 1.1]]; lean = .02;
+    if (Math.random() < dt * 40) emit(st.P, { x: side > 0 ? 258 : 62, y: feet - rnd(0, 50), vx: f * rnd(10, 50), vy: rnd(-160, -60), drag: 4, r: 1.6, col: C.gold, glow: 8, kind: 'streak', life: rnd(.15, .3) }); }
+  else { const kk = (k - .38) / .62; x = lerp(wx, ox, easeOut(kk) * .35 + kk * .65); feet = lerp(Y0 + 18, Y0, kk) - 4 * 44 * kk * (1 - kk);
+    const m = clamp(kk / .35, 0, 1); legs = lerpPose([[-.95, -.15], [.15, -.35]], [[-.55, -1.25], [.95, -1.35]], m); arms = lerpPose([[1.7, .5], [2.5, .2]], [[-1.9, .5], [2.0, .5]], m); lean = lerp(.1, .35, m);
+    if (st.kick !== half) { st.kick = half; for (let i = 0; i < 10; i++) emit(st.P, { x: wx + side * 12, y: feet - 6, vx: f * rnd(20, 120), vy: rnd(-60, 60), drag: 3, r: rnd(3, 6), col: 'rgba(170,120,105,.4)', life: .45, shrink: 1 }); } }
+  const J = rig({ x, y: feet - 74, f, s, lean, tilt: -.12, legs, arms });
+  ghosts(ctx, st.gh, sliding ? null : J, dt, { every: .03, life: .2, alpha: .3 });
+  drawPlayer(ctx, J, t * 1.6, sliding ? .5 : 1.2, sliding ? -.6 : 0);
+  const w = blade(ctx, J.armF.ex, J.armF.ey, J.armF.can, 'katana', .95, .6);
+  ribbon(ctx, st.tr, w, dt);
+  stepParts(ctx, st.P, dt);
+}, () => ({ bg: plateBg({ ly: PH * .35 }), P: [], gh: {}, tr: [] }));
+
+mount('cv-slam', PW, PH, (ctx, t, dt, r) => {
+  const st = r.st;
+  st.shake = Math.max(0, (st.shake || 0) - dt);
+  ctx.save(); if (st.shake > 0) ctx.translate(rnd(-1, 1) * st.shake * 40, rnd(-1, 1) * st.shake * 40);
+  ctx.drawImage(st.bg, -8, -8, PW + 16, PH + 16); slab(ctx, -10, GY, PW + 20, 60);
+  const T = 2.0, u = (t % T) / T, cyc = Math.floor(t / T), s = 1.15, x = 160, since = u - .4;
+  [[52, 1], [268, -1]].forEach(([ex, ef]) => {
+    let dx = 0, dy = 0, a = 1;
+    if (since > 0) { const k = clamp(since / .32, 0, 1); dx = -ef * easeOut(k) * 70; dy = -S(PI * k) * 60; a = u > .82 ? 1 - (u - .82) / .1 : 1; if (u > .92) { a = (u - .92) / .08; dx = 0; dy = 0; } }
+    ctx.save(); ctx.globalAlpha = clamp(a, 0, 1);
+    rotAbout(ctx, ex + dx, GY - 40 + dy, since > 0 && u < .92 ? -ef * clamp(since / .32, 0, 1) * 1.2 : 0, () =>
+      drawShambler(ctx, ex + dx, GY + dy, .9, t * .5, ef, since > 0 && since < .06 ? { body: '#ffe6d6', back: '#ffe6d6', rim: false } : {}));
+    ctx.restore();
+  });
+  let feet, legs, arms, lean = .1, hip;
+  const stand = { l: [[-.2, .05], [.25, -.1]], a: [[-.3, .5], [.4, .8]] }, crouch = { l: [[.3, -2.0], [1.25, -2.3]], a: [[-1.4, .3], [.3, .1]] };
+  const diving = u >= .3 && u < .4;
+  if (u < .3) { feet = GY - 96 - 8 * S(PI * u / .3); legs = [[.6, -1.8], [1.0, -2.0]]; arms = [[-2.4, .4], [-2.8, .2]]; hip = feet - 50; }
+  else if (diving) { const k = ((u - .3) / .1) ** 2; feet = lerp(GY - 96, GY, k); legs = [[.3, -1.6], [.7, -1.8]]; arms = [[-1.3, .5], [.05, 0]]; hip = feet - 52; lean = 0; }
+  else if (u < .7) { feet = GY; legs = crouch.l; arms = crouch.a; hip = GY - 33; lean = .35; }
+  else if (u < .85) { const k = ease((u - .7) / .15); feet = GY; legs = lerpPose(crouch.l, stand.l, k); arms = lerpPose(crouch.a, stand.a, k); hip = lerp(GY - 33, GY - 77, k); lean = lerp(.35, .05, k); }
+  else { const k = easeOut((u - .85) / .15); feet = lerp(GY, GY - 96, k); legs = [[-.45, -1.1], [.85, -1.5]]; arms = [[-1.4, .9], [-2.4, .3]]; hip = feet - 74; }
+  if (u >= .4 && st.cyc !== cyc) { st.cyc = cyc; st.shake = .25; st.wave = 0;
+    sparks(st.P, x + 10, GY - 4, 1, 18); for (let i = 0; i < 22; i++) { const a = rnd(PI * 1.05, TAU - .05), v = rnd(120, 380); emit(st.P, { x: x + rnd(-20, 20), y: GY - 3, vx: Co(a) * v, vy: S(a) * v, g: 800, r: rnd(2, 4.5), col: i % 2 ? '#2a2228' : '#5c4a48', kind: 'shred', life: rnd(.5, .9), floor: GY }); }
+    for (let i = 0; i < 10; i++) emit(st.P, { x: x + rnd(-50, 50), y: GY - 4, vx: rnd(-160, 160), vy: rnd(-60, -10), drag: 3, r: rnd(6, 11), col: 'rgba(170,120,105,.3)', life: rnd(.4, .8), shrink: 1 }); }
+  if (st.wave != null) { st.wave += dt; const k = st.wave / .5; if (k < 1) { ctx.save(); ctx.translate(x, GY); ctx.scale(1, .2); ctx.strokeStyle = `rgba(242,180,58,${1 - k})`; ctx.shadowColor = C.gold; ctx.shadowBlur = 16; ctx.lineWidth = 8 * (1 - k) + 2; ctx.beginPath(); ctx.arc(0, 0, 20 + easeOut(k) * 150, 0, TAU); ctx.stroke(); ctx.restore(); } }
+  const J = rig({ x, y: hip, f: 1, s, lean, tilt: -.1, legs, arms });
+  ghosts(ctx, st.gh, diving ? J : null, dt, { every: .012, life: .16, alpha: .35 });
+  drawPlayer(ctx, J, t * 1.2, diving ? .2 : .9, diving ? -1.6 : 0);
+  const w = blade(ctx, J.armF.ex, J.armF.ey, u >= .3 && u < .7 ? PI / 2 : J.armF.can, 'greatsword', .85, u >= .3 && u < .45 ? 1.5 : .5);
+  ribbon(ctx, st.tr, w, dt, '255,176,96', .18);
+  stepParts(ctx, st.P, dt);
+  ctx.restore();
+}, () => ({ bg: plateBg({ ly: PH * .4 }), P: [], cyc: -1, gh: {}, tr: [] }));
+
+mount('cv-shambler', PW, PH, (ctx, t, dt, r) => {
+  const st = r.st; ctx.drawImage(st.bg, 0, 0, PW, PH); floorSlab(ctx);
+  layer(ctx, PW, PH, .45, c => { drawShambler(c, 60, GY, .62, t + 1.3, 1, { body: '#120a0d', back: '#1c1216', rim: false, glow: 6 });
+    drawShambler(c, 272, GY, .7, t + .4, -1, { body: '#120a0d', back: '#1c1216', rim: false, glow: 7, off: 2 }); });
+  const J = drawShambler(ctx, 150, GY, 1.32, t, 1);
+  if (Math.random() < dt * 6) { const h = Math.random() < .5 ? J.armF : J.armB; emit(st.P, { x: h.ex, y: h.ey + 3, vy: 10, g: 500, r: rnd(1.8, 3), col: '#14070b', life: .9, floor: GY - 2 }); }
+  embers(st, dt, 3); stepParts(ctx, st.P, dt);
+}, () => ({ bg: plateBg(), P: [] }));
+
+mount('cv-bat', PW, PH, (ctx, t, dt, r) => {
+  const st = r.st; ctx.drawImage(st.bg, 0, 0, PW, PH);
+  layer(ctx, PW, PH, .5, c => [[60, 70, .45, 1.1], [255, 54, .38, 2.3], [278, 150, .32, .4], [40, 170, .3, 3]].forEach(([x, y, s, o]) =>
+    drawBat(c, x + S(t * 1.3 + o) * 14, y + S(t * 2.1 + o) * 8, s, t, 1, { off: o, body: '#120a0d' })));
+  const y = 140 + S(t * 3) * 9;
+  drawBat(ctx, 160, y, 1.45, t);
+  ctx.strokeStyle = C.shade; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(152, y + 24); ctx.lineTo(149, y + 40 + S(t * 4) * 2); ctx.moveTo(168, y + 24); ctx.lineTo(171, y + 40 - S(t * 4) * 2); ctx.stroke();
+  embers(st, dt, 3); stepParts(ctx, st.P, dt);
+}, () => ({ bg: plateBg({ glow: [150, 50, 70] }), P: [] }));
+
+mount('cv-brute', PW, PH, (ctx, t, dt, r) => {
+  const st = r.st; ctx.drawImage(st.bg, 0, 0, PW, PH); floorSlab(ctx);
+  const ph = t * 2.4, step = Math.floor(ph / PI);
+  const J = drawBrute(ctx, 140, GY, 1.25, t, 1);
+  if (step !== st.step) { st.step = step; const ft = step % 2 ? J.legF : J.legB;
+    for (let i = 0; i < 10; i++) emit(st.P, { x: ft.ex + rnd(-8, 14), y: GY - 2, vx: rnd(-90, 90), vy: rnd(-90, -20), g: 200, drag: 2.5, r: rnd(3, 7), col: 'rgba(170,120,105,.35)', life: rnd(.4, .7), shrink: 1 }); }
+  if (Math.random() < dt * 1.4) for (let i = 0; i < 4; i++) emit(st.P, { x: J.head[0] + 22, y: J.head[1] + 8, vx: rnd(20, 50), vy: rnd(-20, -5), drag: 1, r: rnd(3, 6), col: 'rgba(255,190,170,.25)', life: rnd(.5, .9), shrink: 1 });
+  stepParts(ctx, st.P, dt);
+}, () => ({ bg: plateBg(), P: [], step: 0 }));
+
+mount('cv-spitter', PW, PH, (ctx, t, dt, r) => {
+  const st = r.st; ctx.drawImage(st.bg, 0, 0, PW, PH); floorSlab(ctx);
+  const { ox, oy } = drawHexer(ctx, 112, GY, 1.22, t, 1);
+  const T = 1.8, u = (t % T) / T, c = Math.floor(t / T);
+  if (u < .62) { const k = u / .62, px = lerp(ox + 10, 300, k), py = oy + S(k * PI) * -46 + k * (GY - 20 - oy);
+    ctx.save(); ctx.shadowColor = C.violet; ctx.shadowBlur = 18; ctx.fillStyle = C.violet; circ(ctx, px, py, 7); ctx.restore();
+    if (Math.random() < .7) emit(st.P, { x: px, y: py, vx: rnd(-30, 0), vy: rnd(-10, 10), r: rnd(2, 4), col: C.violet, glow: 8, life: .35, shrink: 1, a: .8 }); }
+  else if (st.c !== c) { st.c = c; for (let i = 0; i < 14; i++) { const a = rnd(PI, TAU), v = rnd(60, 180); emit(st.P, { x: 300, y: GY - 20, vx: Co(a) * v, vy: S(a) * v, g: 400, r: rnd(2, 4), col: C.violet, glow: 8, life: rnd(.4, .7), floor: GY }); } }
+  stepParts(ctx, st.P, dt);
+}, () => ({ bg: plateBg({ glow: [120, 50, 140] }), P: [], c: -1 }));
+
+/* ---------- boss: the Hollow King ---------- */
+const BW = 760, BH = 420, BG = 344;
+mount('cv-boss', BW, BH, (ctx, t, dt, r) => {
+  const st = r.st;
+  st.shake = Math.max(0, (st.shake || 0) - dt);
+  ctx.save(); if (st.shake > 0) ctx.translate(rnd(-1, 1) * st.shake * 40, rnd(-1, 1) * st.shake * 40);
+  ctx.drawImage(st.bg, -10, -10, BW + 20, BH + 20);
+  slab(ctx, -20, BG, BW + 40, 120);
+  layer(ctx, BW, BH, .5, c => [[560, .55, .2], [640, .5, 1.4], [700, .6, 2.2], [600, .62, 3.1], [480, .48, .8]].forEach(([x, s, o], i) =>
+    drawShambler(c, x, BG, s, t + o, -1, { body: '#120a0d', back: '#1c1216', rim: false, glow: 5, off: o })));
+  const T = 2.8, u = (t % T) / T, cyc = Math.floor(t / T);
+  let a, lean;
+  if (u < .52) { const k = ease(u / .52); a = lerp(.5, -2.55, k); lean = lerp(.05, -.18, k); }
+  else if (u < .6) { const k = (u - .52) / .08; a = lerp(-2.55, 1.2, k * k); lean = lerp(-.18, .38, k); }
+  else if (u < .75) { a = 1.2; lean = .38; }
+  else { const k = ease((u - .75) / .25); a = lerp(1.2, .5, k); lean = lerp(.38, .05, k); }
+  const s = 1.55, bx = 270;
+  const J = rig({ x: bx, y: BG - 64 * s, f: 1, s, lean, tilt: -.05, build: { k: 1.7, head: 16, chest: 1.35 }, legs: [[-.4, .02], [.42, -.22]], arms: [[-.4 + lean * .5, .7], [a, .14]] });
+  const [sx, sy] = J.sh;
+  ctx.fillStyle = '#0d080b'; ctx.beginPath(); ctx.moveTo(sx - 16, sy - 6);
+  for (let i = 0; i <= 9; i++) { const x = sx - 30 - i * 14 - S(t * 3 + i * .8) * 9, y = sy + 26 + i * 16 + (i % 2) * 14; ctx.lineTo(x, y); }
+  ctx.lineTo(bx - 50, BG); ctx.lineTo(bx - 6, BG - 30); ctx.closePath(); ctx.fill();
+  const crown = (c2, J2) => { const [x, y, rr] = J2.head;
+    c2.save(); c2.fillStyle = '#16101a'; c2.strokeStyle = 'rgba(255,128,88,.8)'; c2.lineWidth = 1.5;
+    c2.beginPath(); c2.moveTo(x - rr * .95, y - rr * .55); c2.lineTo(x - rr * 1.25, y - rr * 2.1); c2.lineTo(x - rr * .45, y - rr * 1.2); c2.lineTo(x, y - rr * 2.5);
+    c2.lineTo(x + rr * .45, y - rr * 1.2); c2.lineTo(x + rr * 1.25, y - rr * 2.1); c2.lineTo(x + rr * .95, y - rr * .55); c2.closePath(); c2.fill(); c2.stroke();
+    c2.fillStyle = C.crimson; c2.shadowColor = C.crimson; c2.shadowBlur = 12; circ(c2, x, y - rr * 1.25, rr * .16); c2.restore(); };
+  ghosts(ctx, st.gh, u > .5 && u < .62 ? J : null, dt, { every: .015, life: .14, alpha: .28 });
+  paint(ctx, J, { eyes: C.crimson, third: 1, glow: 10, headExtra: crown });
+  const hx = J.armF.ex, hy = J.armF.ey, ha = J.armF.can;
+  ctx.save(); ctx.translate(hx, hy); ctx.rotate(ha);
+  ctx.fillStyle = C.shade; cap(ctx, -14, 0, 100, 0, 4.5, 5.5);
+  ctx.translate(96, 0);
+  const sg = ctx.createLinearGradient(0, -30, 0, 70); sg.addColorStop(0, '#6a707a'); sg.addColorStop(1, '#1d1f24');
+  ctx.fillStyle = sg; ctx.beginPath(); ctx.moveTo(-4, -18); ctx.lineTo(72, -26); ctx.lineTo(80, 66); ctx.lineTo(62, 62); ctx.lineTo(56, 70); ctx.lineTo(40, 64); ctx.lineTo(4, 58); ctx.closePath(); ctx.fill();
+  ctx.save(); ctx.strokeStyle = C.crimson; ctx.shadowColor = C.crimson; ctx.shadowBlur = 14; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(72, -26); ctx.lineTo(80, 66); ctx.stroke(); ctx.restore();
+  ctx.fillStyle = '#08070a'; circ(ctx, 14, -2, 7);
+  ctx.restore();
+  const tipX = hx + Co(ha) * 170, tipY = hy + S(ha) * 170;
+  ribbon(ctx, st.tr, { bx: hx + Co(ha) * 100, by: hy + S(ha) * 100, tx: tipX, ty: tipY }, dt, '229,56,59', .16);
+  if (u >= .6 && st.cyc !== cyc) {
+    st.cyc = cyc; st.shake = .3; const ix = hx + Co(ha) * 140; st.waves.push({ x: ix, t: 0 });
+    for (let i = 0; i < 26; i++) { const aa = rnd(PI * 1.05, TAU - .05), v = rnd(120, 420); emit(st.P, { x: ix + rnd(-40, 40), y: BG - 4, vx: Co(aa) * v, vy: S(aa) * v, g: 700, drag: 1, r: rnd(2, 5), col: i % 3 ? '#2a2228' : C.crimson, glow: i % 3 ? 0 : 8, kind: 'shred', life: rnd(.6, 1.1), floor: BG + 6 }); }
+    for (let i = 0; i < 14; i++) emit(st.P, { x: ix + rnd(-60, 60), y: BG - 4, vx: rnd(-140, 140), vy: rnd(-90, -20), drag: 3, r: rnd(6, 12), col: 'rgba(170,120,105,.3)', life: rnd(.5, .9), shrink: 1 });
+  }
+  st.waves = st.waves.filter(w => (w.t += dt) < .9);
+  st.waves.forEach(w => { const k = w.t / .9; ctx.save(); ctx.translate(w.x, BG); ctx.scale(1, .18); ctx.strokeStyle = `rgba(229,56,59,${.8 * (1 - k)})`; ctx.shadowColor = C.crimson; ctx.shadowBlur = 16; ctx.lineWidth = 10 * (1 - k) + 2;
+    ctx.beginPath(); ctx.arc(0, 0, 40 + k * 300, 0, TAU); ctx.stroke(); ctx.restore(); });
+  embers(st, dt, 8, BW, BH); stepParts(ctx, st.P, dt);
+  ctx.restore();
+  const by = BH - 40, bw = 480, x0 = (BW - bw) / 2;
+  ctx.font = `600 13px ${MONO}`; ctx.fillStyle = '#f3ebe0'; ctx.textAlign = 'left'; ctx.shadowColor = '#000'; ctx.shadowBlur = 6;
+  ctx.fillText('THE HOLLOW KING', x0, by - 8); ctx.textAlign = 'right'; ctx.fillText('PHASE 1', x0 + bw, by - 8); ctx.shadowBlur = 0;
+  ctx.fillStyle = 'rgba(0,0,0,.9)'; ctx.fillRect(x0 - 3, by - 3, bw + 6, 18);
+  ctx.fillStyle = '#4a1014'; ctx.fillRect(x0, by, bw, 12);
+  ctx.fillStyle = C.crimson; ctx.fillRect(x0, by, bw * (.62 + S(t * .3) * .02), 12);
+  ctx.fillStyle = 'rgba(255,255,255,.2)'; ctx.fillRect(x0, by, bw, 3);
+  ctx.fillStyle = C.gold; ctx.fillRect(x0 + bw * .5 - 1, by - 5, 2, 22);
+}, () => ({ bg: stageBg(BW, BH, { lx: 300, ly: 200, spread: .7, horizon: BG + 4, glow: [200, 60, 50] }), P: [], waves: [], cyc: -1, gh: {}, tr: [] }));
+
+/* ---------- key art ---------- */
+const KW = 920, KH = Math.round(920 * 215 / 460);
+mount('cv-key', KW, KH, (ctx, t, dt, r) => {
+  const st = r.st; ctx.drawImage(st.bg, 0, 0, KW, KH);
+  let Jb;
+  layer(ctx, KW, KH, .55, c => { c.save();
+    Jb = rig({ x: 830, y: 290, f: -1, s: 3.0, lean: -.12, tilt: .1, build: { k: 1.7, head: 16, chest: 1.35 }, legs: [[-.3, 0], [.3, -.2]], arms: [[.2, .6], [-2.4 + S(t * .8) * .06, .1]] });
+    paint(c, Jb, { body: '#1b0d11', back: '#1b0d11', rim: false });
+    c.translate(Jb.armF.ex, Jb.armF.ey); c.rotate(Jb.armF.can); c.fillStyle = '#1b0d11'; cap(c, 0, 0, 140, 0, 6, 6); c.fillRect(130, -60, 70, 120);
+    c.restore(); });
+  eyes(ctx, Jb, { eyes: C.crimson, third: 1, glow: 22 });
+  layer(ctx, KW, KH, .85, c => [[470, 60, .5, 0], [400, 40, .38, 1], [740, 90, .42, 2], [350, 110, .3, 3], [690, 40, .34, 4]].forEach(([x, y, s, o]) => drawBat(c, x + S(t + o) * 10, y + S(t * 1.7 + o) * 6, s, t, 1, { off: o, body: '#0b0609' })));
+  layer(ctx, KW, KH, .8, c => { for (const h of st.far) drawShambler(c, h.x, h.y, h.s, t * .7 + h.o, h.f, { body: '#0e070a', back: '#0e070a', rim: false, glow: 8, off: h.o }); });
+  const fl = S(t * 1.6) * 4;
+  const J = rig({ x: 560, y: 205 + fl, f: 1, s: 1.75, lean: .22, tilt: -.18, legs: [[-1.0, -.65], [1.05, -1.55]], arms: [[-1.2, .9], [-2.1 + S(t * 1.6) * .18, .1]] });
+  const tipR = Math.hypot(J.armF.ex - J.sh[0], J.armF.ey - J.sh[1]) + 80;
+  smear(ctx, J.sh[0], J.sh[1], tipR, J.armF.can + 2.3, J.armF.can + .05, 1.6, .5 + S(t * 2) * .08);
+  drawPlayer(ctx, J, t * 1.3, 1.4, .1);
+  const w = blade(ctx, J.armF.ex, J.armF.ey, J.armF.can, 'katana', 1.55, 1.4);
+  ribbon(ctx, st.tr, w, dt, '255,176,96', .35);
+  for (const h of st.near) drawShambler(ctx, h.x, h.y, h.s, t * .8 + h.o, h.f, { off: h.o });
+  drawBrute(ctx, 860, KH + 30, 1.5, t * .6, -1);
+  embers(st, dt, 18, KW, KH); stepParts(ctx, st.P, dt);
+}, (W, H) => {
+  const far = [], near = [];
+  for (let i = 0; i < 24; i++) { const x = rnd(330, 920), sc = rnd(.55, .85); far.push({ x, y: H - rnd(46, 70), s: sc, o: rnd(0, 10), f: x > 560 ? -1 : 1 }); }
+  far.sort((a, b) => a.y - b.y);
+  [[300, 1.05], [400, 1.25], [700, 1.2], [770, 1.45], [470, 1.5]].forEach(([x, s], i) => near.push({ x, y: H + 18 + i * 4, s, o: i * 1.7, f: x > 560 ? -1 : 1 }));
+  return { bg: stageBg(W, H, { lx: 600, ly: 150, spread: .75, moon: [610, 150, 92], horizon: H - 40, glow: [200, 60, 50], vig: .85 }), far, near, P: [], tr: [] };
+});
+
+/* ---------- arenas: hand-built tile worlds that drive both the ladder art and the live mock ---------- */
+const mulberry = s => () => { s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+// # rock   = stone bridge   - chained platform   ~ foundry belt   w black water
+// P portal   b brazier   I ruined column   B bell   T throne   S wall saw
+const TS = 40;
+const MAPS = {
+  pit: [
+    "########################################",
+    "########################################",
+    "########......###......###......########",
+    "#####.........###......###.........#####",
+    "#####..............................#####",
+    "#......................................#",
+    "#......................................#",
+    "#......................................#",
+    "#.......=======..........=======.......#",
+    "#b.P................................P.b#",
+    "###.................P................###",
+    "###..................................###",
+    "###...=====......======......=====...###",
+    "###..................................###",
+    "#####..............................#####",
+    "#####..............................#####",
+    "#####........======..======........#####",
+    "#......................................#",
+    "#...........P..............P...........#",
+    "#b....................................b#",
+    "####......======........======......####",
+    "####................................####",
+    "######............................######",
+    "######.....I......####......I.....######",
+    "########.........######.........########",
+    "########.........######.........########",
+    "##########.......######.......##########",
+    "########################################"
+  ],
+  spire: [
+    "################################################",
+    "################################################",
+    "##########....#######........#######....########",
+    "######..........###............###.........#####",
+    "#......................B.......................#",
+    "#b............................................b#",
+    "######.................P..................######",
+    "######....................................######",
+    "#..............................................#",
+    "#.......------.....==========.....------.......#",
+    "#..............................................#",
+    "#..............................................#",
+    "#########....=====............=====....#########",
+    "#########..............................#########",
+    "#.........P...........................P........#",
+    "#........-------......------........-------....#",
+    "#b.............................................#",
+    "#######........................................#",
+    "#######.......-------........-------...........#",
+    "#######.......................................b#",
+    "####.....................................#######",
+    "#......-------.......-------.......------#######",
+    "#........................................#######",
+    "######......................................####",
+    "######.....-------..........-------............#",
+    "#.......................P......................#",
+    "#.............................................b#",
+    "#.....P.............=======...............######",
+    "#.............######......................######",
+    "#..........#########..........P...........######",
+    "#.......############.................=====######",
+    "#.......#########.....======...................#",
+    "#b.......#####..............#####..............#",
+    "#####.......................#########..........#",
+    "#####............=======......###########......#",
+    "#######...........................#######......#",
+    "#######.=======......................###.......#",
+    "#######.................=======................#",
+    "#..............................................#",
+    "##########=====################=====############",
+    "##########.....################.....############",
+    "####...................P....................####",
+    "####.....=======..............=======.......####",
+    "####.b....................................b.####",
+    "####=======.........========.........=======####",
+    "####........................................####",
+    "####....I........I............I........I....####",
+    "#############=======########=======#############",
+    "#############.......########.......#############",
+    "#############.......########.......#############",
+    "####.........=======........=======............#",
+    "####....P...............................P......#",
+    "#...=======........==========........=======...#",
+    "#b............................................b#",
+    "#####......................................#####",
+    "#####.....=======..............=======.....#####",
+    "########................................########",
+    "########................................########",
+    "########....I...........I..........I....########",
+    "################################################"
+  ],
+  well: [
+    "############################",
+    "############################",
+    "#..........................#",
+    "#..........................#",
+    "#..................#########",
+    "#..................#########",
+    "#####.....................b#",
+    "#####..======..............#",
+    "#............P.............#",
+    "#..........................#",
+    "#########..................#",
+    "#########..................#",
+    "#......................#####",
+    "#..............======..#####",
+    "#..........................#",
+    "#..........................#",
+    "#..................#########",
+    "#..................#########",
+    "#b###......................#",
+    "#####..======..............#",
+    "#............P.............#",
+    "#..........................#",
+    "#########..................#",
+    "#########..................#",
+    "#......................#####",
+    "#..............======..#####",
+    "#..........................#",
+    "#..........................#",
+    "#..................#########",
+    "#..................#########",
+    "#####.....................b#",
+    "#####..======..............#",
+    "#............P.............#",
+    "#..........................#",
+    "#########..................#",
+    "#########..................#",
+    "#......................#####",
+    "#..............======..#####",
+    "#..........................#",
+    "#..........................#",
+    "#..................#########",
+    "#..................#########",
+    "#b###......................#",
+    "#####..======..............#",
+    "#............P.............#",
+    "#..........................#",
+    "#########..................#",
+    "#########..................#",
+    "#......................#####",
+    "#..............======..#####",
+    "#..........................#",
+    "#..........................#",
+    "#..................#########",
+    "#..................#########",
+    "#####.....................b#",
+    "#####..======..............#",
+    "#............P.............#",
+    "#..........................#",
+    "#########..................#",
+    "#########..................#",
+    "#......................#####",
+    "#..............======..#####",
+    "#.........========.........#",
+    "#..........................#",
+    "#..........................#",
+    "#..........................#",
+    "#ww======wwwwwwwww=======ww#",
+    "#wwwwwwwwwwwwwwwwwwwwwwwwww#",
+    "#wwwwwwwwwwwwwwwwwwwwwwwwww#",
+    "#wwwwwwwwwwwwwwwwwwwwwwwwww#",
+    "#wwwwwwwwwwwwwwwwwwwwwwwwww#",
+    "#wwwwwwwwwwwwwwwwwwwwwwwwww#",
+    "#wwwwwwwwwwwwwwwwwwwwwwwwww#",
+    "#wwwwwwwwwwwwwwwwwwwwwwwwww#",
+    "############################"
+  ],
+  blade: [
+    "################################################",
+    "################################################",
+    "################################################",
+    "#==============================================#",
+    "#...................########...................#",
+    "#...................########...................#",
+    "#...................########...................#",
+    "#.....................####.....................#",
+    "#.....................####....................S#",
+    "#.....................####.....................#",
+    "###########.........................############",
+    "###########.........................############",
+    "###########.......~~~~~~P~~~~~.................#",
+    "###########....................................#",
+    "#..............................................#",
+    "#.............................~~~~~~~~~........#",
+    "#S....................####.....................#",
+    "#.....................####.....................#",
+    "#.....................####.....................#",
+    "############.........................###########",
+    "############.........................###########",
+    "#.................~~~~~~~~~~~~.......###########",
+    "#....................................###########",
+    "#..............................................#",
+    "#........~~~~~~~~~............................S#",
+    "#.....................####.....................#",
+    "#.....P...............####.....................#",
+    "#.....................####.....................#",
+    "###########.........................############",
+    "###########.........................############",
+    "###########.......~~~~~~~~~~~~.................#",
+    "###########....................................#",
+    "#S.............................................#",
+    "#.............................~~~~~~~~~........#",
+    "#.....................####.....................#",
+    "#.....................####...............P.....#",
+    "#.....................####.....................#",
+    "############.........................###########",
+    "############.........................###########",
+    "#.................~~~~~~~~~~~~.......###########",
+    "#....................................#########S#",
+    "#..............................................#",
+    "#........~~~~~~~~~.............................#",
+    "#.....................####.....................#",
+    "#.....................####.....................#",
+    "#.....................####.....................#",
+    "###########.........................############",
+    "###########.........................############",
+    "#S#########.......~~~~~~P~~~~~.................#",
+    "###########....................................#",
+    "#..............................................#",
+    "#.............................~~~~~~~~~........#",
+    "#.....................####.....................#",
+    "#.....................####.....................#",
+    "#.....................####.....................#",
+    "############.........................###########",
+    "############.........................#########S#",
+    "#.................~~~~~~~~~~~~.......###########",
+    "#.......P............................###P#######",
+    "#..............................................#",
+    "#........~~~~~b~~~...............b.............#",
+    "#.............####################.............#",
+    "#.............####################.............#",
+    "################################################",
+    "################################################",
+    "################################################"
+  ],
+  throne: [
+    "########################################################",
+    "########################################################",
+    "########################################################",
+    "###########..................................###########",
+    "###########..................................###########",
+    "######............................................######",
+    "######............................................######",
+    "#......................................................#",
+    "#..........................T...........................#",
+    "#......................................................#",
+    "#...................################...................#",
+    "#.................####################.................#",
+    "#...............########################...............#",
+    "#.............############################.............#",
+    "#...........################################...........#",
+    "#.......P.........####################.........P.......#",
+    "#.................####################.................#",
+    "#......................................................#",
+    "#...######....................................######...#",
+    "#...######....................................######...#",
+    "#..................======......======..................#",
+    "#......................................................#",
+    "#b.........................P..........................b#",
+    "#......................................................#",
+    "#.........========....................========.........#",
+    "########........................................########",
+    "########........................................########",
+    "#......................................................#",
+    "#.....................============.....................#",
+    "#......................................................#",
+    "#.....========............................========.....#",
+    "#...........I.....I..................I.....I...........#",
+    "#...........I.....I..................I.....I...........#",
+    "#...P..............................................P...#",
+    "#..............========..........========..............#",
+    "######............................................######",
+    "######............................................######",
+    "######............................................######",
+    "##########....................................##########",
+    "##########......b......................b......##########",
+    "##########..###..........................###..##########",
+    "##########..###..........................###..##########",
+    "##########..###..........................###..##########",
+    "##########..###..........................###..##########",
+    "########################################################"
+  ]
+};
+const tile = (A, c, r) => r < 0 || r >= A.rows || c < 0 || c >= A.cols ? '#' : A.g[r][c];
+const isSolid = (A, c, r) => tile(A, c, r) === '#';
+const isOne = (A, c, r) => '=-~'.includes(tile(A, c, r));
+function parseArena(name, g, extra = {}) {
+  const A = Object.assign({ name, g, cols: g[0].length, rows: g.length, portals: [], braz: [], pillars: [], saws: [], spans: [] }, extra);
+  A.w = A.cols * TS; A.h = A.rows * TS;
+  g.forEach((l, r) => [...l].forEach((ch, c) => { const x = c * TS + TS / 2, y = r * TS + TS / 2;
+    if (ch === 'P') A.portals.push([x, y]);
+    else if (ch === 'b') { const sd = isSolid(A, c - 1, r) ? 1 : isSolid(A, c + 1, r) ? -1 : 0; A.braz.push([sd > 0 ? c * TS : sd < 0 ? (c + 1) * TS : x, y + 4, sd]); }
+    else if (ch === 'I') A.pillars.push([x, (r + 1) * TS, 3 + (c * 7 + r * 3) % 4]);
+    else if (ch === 'B') A.bell = [x, r * TS];
+    else if (ch === 'T') A.throne = [x, (r + 1) * TS];
+    else if (ch === 'S') A.saws.push([c < A.cols / 2 ? TS : A.w - TS, y]);
+  }));
+  for (let r = 1; r < A.rows; r++) {
+    let c0 = -1, ty = '';
+    for (let c = 0; c <= A.cols; c++) {
+      const ok = c < A.cols && (isSolid(A, c, r) || isOne(A, c, r)) && !isSolid(A, c, r - 1) && !isSolid(A, c, r - 2), t = ok ? (isSolid(A, c, r) ? '#' : tile(A, c, r)) : '';
+      if (c0 >= 0 && t !== ty) { A.spans.push([c0 * TS, c * TS, r * TS, ty]); c0 = -1; }
+      if (ok && c0 < 0) { c0 = c; ty = t; }
+    }
+  }
+  return A;
+}
+const ARENAS = [
+  parseArena('The Pit', MAPS.pit),
+  parseArena('Hanging Spire', MAPS.spire),
+  parseArena('The Drowned Well', MAPS.well, { tide: 1 }),
+  parseArena('Bladeworks', MAPS.blade),
+  parseArena('Hollow Throne', MAPS.throne)
+];
+
+function gothicArch(c, x, y, w, h) { c.beginPath(); c.moveTo(x - w / 2, y + h); c.lineTo(x - w / 2, y + w * .5); c.quadraticCurveTo(x - w / 2, y, x, y - w * .25); c.quadraticCurveTo(x + w / 2, y, x + w / 2, y + w * .5); c.lineTo(x + w / 2, y + h); c.closePath(); }
+// Paints the whole arena once into an offscreen canvas: backdrop architecture, rock, bridges and props.
+function renderWorld(A) {
+  if (A.img) return A.img;
+  const cv = document.createElement('canvas'); cv.width = A.w; cv.height = A.h; const c = cv.getContext('2d');
+  const R = mulberry(A.cols * 131 + A.rows), air = (cc, r) => !isSolid(A, cc, r);
+  // backdrop: carved halls and lit windows, only where there is open space
+  for (let y = 160, row = 0; y < A.h - 200; y += 420, row++) for (let x = 160 + (row % 2) * 170; x < A.w - 120; x += 340) {
+    const cc = Math.floor(x / TS), r = Math.floor((y + 120) / TS); if (!air(cc, r) || !air(cc, r - 3) || !air(cc, r + 3)) continue;
+    c.save(); gothicArch(c, x, y, 120, 280); c.fillStyle = 'rgba(22,12,16,.85)'; c.fill();
+    gothicArch(c, x, y + 18, 84, 250); const g = c.createLinearGradient(0, y, 0, y + 260); g.addColorStop(0, 'rgba(120,30,30,.35)'); g.addColorStop(1, 'rgba(40,10,14,.1)'); c.fillStyle = g; c.fill();
+    c.strokeStyle = 'rgba(8,4,6,.9)'; c.lineWidth = 4; c.beginPath(); c.moveTo(x, y - 8); c.lineTo(x, y + 268); c.moveTo(x - 42, y + 110); c.lineTo(x + 42, y + 110); c.stroke(); c.restore();
+  }
+  // ruined columns
+  for (const [x, y, n] of A.pillars) { const h = n * TS + 20, w = 30;
+    c.save(); c.fillStyle = '#150d12'; c.beginPath(); c.moveTo(x - w / 2 - 6, y); c.lineTo(x - w / 2 - 6, y - 14); c.lineTo(x - w / 2, y - 18); c.lineTo(x - w / 2, y - h);
+    c.lineTo(x - 6, y - h - 14); c.lineTo(x + 2, y - h + 4); c.lineTo(x + w / 2, y - h - 8); c.lineTo(x + w / 2, y - 18); c.lineTo(x + w / 2 + 6, y - 14); c.lineTo(x + w / 2 + 6, y); c.fill();
+    c.strokeStyle = 'rgba(0,0,0,.6)'; c.lineWidth = 2; for (let k = -1; k <= 1; k++) { c.beginPath(); c.moveTo(x + k * 8, y - 20); c.lineTo(x + k * 8, y - h + 6); c.stroke(); }
+    c.fillStyle = 'rgba(255,128,88,.18)'; c.fillRect(x - w / 2, y - h, 2, h - 18); c.restore(); }
+  // chains for hanging platforms
+  c.strokeStyle = '#1d1519'; c.lineWidth = 3;
+  for (const [x0, x1, y, t] of A.spans) if (t === '-') for (const x of [x0 + 14, x1 - 14]) {
+    let r = Math.floor(y / TS) - 1; while (r > 0 && air(Math.floor(x / TS), r)) r--; const top = (r + 1) * TS;
+    for (let yy = top; yy < y; yy += 9) { c.beginPath(); c.ellipse(x, yy + 4, 2.4, 4.6, 0, 0, TAU); c.stroke(); } }
+  // the bell
+  if (A.bell) { const [x, y] = A.bell; c.strokeStyle = '#1d1519'; c.lineWidth = 5; c.beginPath(); c.moveTo(x, y - 40); c.lineTo(x, y + 20); c.stroke();
+    c.fillStyle = '#120b0f'; c.beginPath(); c.moveTo(x - 20, y + 20); c.quadraticCurveTo(x - 30, y + 30, x - 36, y + 100); c.lineTo(x - 50, y + 118); c.lineTo(x + 50, y + 118); c.lineTo(x + 36, y + 100); c.quadraticCurveTo(x + 30, y + 30, x + 20, y + 20); c.closePath(); c.fill();
+    c.strokeStyle = 'rgba(255,128,88,.5)'; c.lineWidth = 2; c.beginPath(); c.moveTo(x - 50, y + 118); c.lineTo(x + 50, y + 118); c.moveTo(x - 32, y + 40); c.quadraticCurveTo(x - 36, y + 80, x - 44, y + 112); c.stroke(); }
+  // rock is painted on its own layer: organic blobs, then strata and grit clipped to it, then lit edges
+  const rk = document.createElement('canvas'); rk.width = A.w; rk.height = A.h; const k = rk.getContext('2d');
+  // far cave wall behind the playable rock, so the open space reads as a cavern rather than a void
+  const back = document.createElement('canvas'); back.width = A.w; back.height = A.h; const bk = back.getContext('2d');
+  bk.fillStyle = 'rgba(28,14,19,.75)';
+  for (let r = 0; r < A.rows; r++) for (let cc = 0; cc < A.cols; cc++) if (isSolid(A, cc, r)) for (let j = 0; j < 2; j++) { bk.beginPath(); bk.arc(cc * TS + R() * TS, r * TS + R() * TS, 30 + R() * 46, 0, TAU); bk.fill(); }
+  c.drawImage(back, 0, 0);
+  k.fillStyle = '#150d12';
+  for (let r = 0; r < A.rows; r++) for (let cc = 0; cc < A.cols; cc++) if (isSolid(A, cc, r)) {
+    const x = cc * TS, y = r * TS, up = air(cc, r - 1), dn = air(cc, r + 1), lf = air(cc - 1, r), rt = air(cc + 1, r);
+    k.fillRect(x + (lf ? 4 : -1), y + (up ? 0 : -1), TS - (lf ? 4 : -1) - (rt ? 4 : -1), TS - (dn ? 6 : -2));
+    // corners bulge out in random lumps; tops stay flat so they are honest to walk on
+    for (let j = 0; j < 4; j++) { const bx = x + R() * TS, by = y + (up ? 12 : 0) + R() * (TS - (up ? 12 : 0)), rr = 9 + R() * 12;
+      if ((lf && bx - rr < x - 8) || (rt && bx + rr > x + TS + 8) || (dn && by + rr > y + TS + 10) || (up && by - rr < y)) continue; k.beginPath(); k.arc(bx, by, rr, 0, TAU); k.fill(); }
+    if (lf) { k.beginPath(); k.moveTo(x + 4, y + (up ? 0 : -1)); for (let j = 1; j < 5; j++) k.lineTo(x - 2 - R() * 7, y + j * TS / 5); k.lineTo(x + 4, y + TS + 1); k.fill(); }
+    if (rt) { k.beginPath(); k.moveTo(x + TS - 4, y + (up ? 0 : -1)); for (let j = 1; j < 5; j++) k.lineTo(x + TS + 2 + R() * 7, y + j * TS / 5); k.lineTo(x + TS - 4, y + TS + 1); k.fill(); }
+    if (dn) { k.beginPath(); k.moveTo(x - 1, y + TS - 8); for (let j = 0; j <= 4; j++) k.lineTo(x + j * TS / 4, y + TS - 4 + R() * 10); k.lineTo(x + TS + 1, y + TS - 8); k.fill();
+      for (let j = 0; j < 2; j++) if (R() < .6) { const sx = x + 6 + R() * (TS - 12), len = 10 + R() * R() * 46, wd = 4 + R() * 6; k.beginPath(); k.moveTo(sx - wd, y + TS - 2); k.quadraticCurveTo(sx - wd * .3, y + TS + len * .6, sx, y + TS + len); k.quadraticCurveTo(sx + wd * .3, y + TS + len * .6, sx + wd, y + TS - 2); k.fill(); } }
+  }
+  k.globalCompositeOperation = 'source-atop';
+  for (let y = 0; y < A.h; y += 9) { k.strokeStyle = `rgba(${40 + R() * 20},${22 + R() * 8},${28 + R() * 8},${.08 + R() * .16})`; k.lineWidth = 1 + R() * 2; k.beginPath(); k.moveTo(0, y); for (let x = 0; x <= A.w; x += 60) k.lineTo(x, y + S(x * .01 + y * .3) * 3 + (R() - .5) * 3); k.stroke(); }
+  for (let i = 0; i < A.w * A.h / 900; i++) { k.fillStyle = R() < .5 ? 'rgba(0,0,0,.35)' : 'rgba(70,40,46,.25)'; k.fillRect(R() * A.w, R() * A.h, 1 + R() * 3, 1 + R() * 2); }
+  for (let i = 0; i < A.w * A.h / 40000; i++) { k.strokeStyle = 'rgba(4,2,5,.8)'; k.lineWidth = 1 + R(); k.beginPath(); let px = R() * A.w, py = R() * A.h; k.moveTo(px, py); for (let j = 0; j < 5; j++) { px += (R() - .5) * 30; py += R() * 22; k.lineTo(px, py); } k.stroke(); }
+  // light: a warm glow soaks into rock faces that border open space
+  for (let r = 0; r < A.rows; r++) for (let cc = 0; cc < A.cols; cc++) if (isSolid(A, cc, r)) {
+    const x = cc * TS, y = r * TS;
+    if (air(cc, r - 1)) { const g = k.createLinearGradient(0, y, 0, y + 30); g.addColorStop(0, 'rgba(255,120,80,.28)'); g.addColorStop(1, 'rgba(255,120,80,0)'); k.fillStyle = g; k.fillRect(x, y, TS, 30); }
+    if (air(cc - 1, r)) { const g = k.createLinearGradient(x - 10, 0, x + 18, 0); g.addColorStop(0, 'rgba(255,120,80,.14)'); g.addColorStop(1, 'rgba(255,120,80,0)'); k.fillStyle = g; k.fillRect(x - 10, y, 28, TS); }
+    if (air(cc + 1, r)) { const g = k.createLinearGradient(x + TS + 10, 0, x + TS - 18, 0); g.addColorStop(0, 'rgba(255,120,80,.14)'); g.addColorStop(1, 'rgba(255,120,80,0)'); k.fillStyle = g; k.fillRect(x + TS - 18, y, 28, TS); }
+    if (air(cc, r + 1)) { k.fillStyle = 'rgba(0,0,0,.35)'; k.fillRect(x, y + TS - 14, TS, 60); }
+  }
+  k.globalCompositeOperation = 'source-over';
+  // walkable tops: a hot ember rim with loose stones, roots and the odd skull
+  for (let r = 0; r < A.rows; r++) for (let cc = 0; cc < A.cols; cc++) if (isSolid(A, cc, r) && air(cc, r - 1)) {
+    const x = cc * TS, y = r * TS, l = air(cc - 1, r) ? 4 : 0, rr = air(cc + 1, r) ? 4 : 0;
+    k.strokeStyle = 'rgba(255,128,88,.9)'; k.lineWidth = 2; k.beginPath(); k.moveTo(x + l, y + .5); k.lineTo(x + TS / 2, y + .5 + (R() - .5)); k.lineTo(x + TS - rr, y + .5); k.stroke();
+    if (R() < .3) { k.fillStyle = '#0a0609'; const px = x + 6 + R() * (TS - 12); k.beginPath(); k.ellipse(px, y, 3 + R() * 6, 2 + R() * 3, 0, PI, TAU); k.fill(); k.fillStyle = 'rgba(255,128,88,.7)'; k.fillRect(px - 2, y - 3, 3, 1); }
+    if (R() < .18) { k.strokeStyle = '#1c1216'; k.lineWidth = 1.2; const px = x + R() * TS; for (let j = 0; j < 5; j++) { k.beginPath(); k.moveTo(px + j * 2, y); k.quadraticCurveTo(px + j * 2 + (R() - .5) * 8, y - 6, px + j * 3 + (R() - .5) * 10, y - 9 - R() * 9); k.stroke(); } }
+    if (R() < .04) { k.fillStyle = '#d9cbb8'; const px = x + 10 + R() * 20; k.beginPath(); k.arc(px, y - 5, 5, PI, TAU); k.lineTo(px + 4, y); k.lineTo(px - 4, y); k.fill(); k.fillStyle = '#0a0609'; k.fillRect(px - 3, y - 6, 2, 2); k.fillRect(px + 1, y - 6, 2, 2); }
+  }
+  c.drawImage(rk, 0, 0);
+  // bridges, chained platforms and foundry belts
+  for (const [x0, x1, y, t] of A.spans) {
+    if (t === '#') continue;
+    const w = x1 - x0;
+    if (t === '=') {
+      c.fillStyle = '#1d1318'; c.beginPath(); c.moveTo(x0, y); c.lineTo(x1, y); c.lineTo(x1, y + 22); c.quadraticCurveTo((x0 + x1) / 2, y + 2, x0, y + 22); c.closePath(); c.fill();
+      c.strokeStyle = 'rgba(0,0,0,.55)'; c.lineWidth = 1; c.beginPath(); c.moveTo(x0, y + 8); c.lineTo(x1, y + 8); c.stroke();
+      for (let x = x0 + 12, i = 0; x < x1; x += 22, i++) { c.beginPath(); c.moveTo(x + (i % 2) * 11, y + 1); c.lineTo(x + (i % 2) * 11, y + 8); c.stroke(); }
+      c.fillStyle = '#120b0f'; c.fillRect(x0, y, 6, 26); c.fillRect(x1 - 6, y, 6, 26);
+    } else if (t === '-') {
+      c.fillStyle = '#1b120f'; c.fillRect(x0 + 2, y, w - 4, 12); c.strokeStyle = 'rgba(0,0,0,.7)'; c.lineWidth = 1; for (let x = x0 + 16; x < x1; x += 16) { c.beginPath(); c.moveTo(x, y + 1); c.lineTo(x, y + 11); c.stroke(); }
+      c.fillStyle = '#2a2026'; c.fillRect(x0 + 10, y - 1, 8, 14); c.fillRect(x1 - 18, y - 1, 8, 14);
+    } else {
+      c.fillStyle = '#1b1c22'; c.fillRect(x0, y, w, 14); c.fillStyle = '#0b0b0e'; for (let x = x0 + 10; x < x1; x += 22) circ(c, x, y + 7, 4.5);
+      c.fillStyle = 'rgba(242,180,58,.5)'; for (let x = x0; x < x1 - 10; x += 20) { c.beginPath(); c.moveTo(x, y + 14); c.lineTo(x + 8, y + 14); c.lineTo(x + 14, y + 18); c.lineTo(x + 6, y + 18); c.fill(); }
+    }
+    c.fillStyle = 'rgba(255,128,88,.9)'; c.fillRect(x0, y - 1, w, 2);
+  }
+  // black water
+  if (A.tide) for (let r = 0; r < A.rows; r++) for (let cc = 0; cc < A.cols; cc++) if (tile(A, cc, r) === 'w') { c.fillStyle = '#020203'; c.fillRect(cc * TS, r * TS, TS, TS); if (tile(A, cc, r - 1) !== 'w') { c.fillStyle = 'rgba(229,56,59,.8)'; c.fillRect(cc * TS, r * TS, TS, 2); } }
+  // wall sconces, saws, throne
+  for (const [x, y, sd] of A.braz) { c.fillStyle = '#16101a'; if (sd) c.fillRect(x + (sd > 0 ? 0 : -18), y, 18, 8); else { c.fillRect(x - 3, y, 6, TS / 2 - 4); c.fillRect(x - 10, y - 2, 20, 6); } }
+  for (const [x, y] of A.saws) { c.save(); c.fillStyle = '#2a2226'; c.strokeStyle = C.crimson; c.lineWidth = 2; c.beginPath(); for (let i = 0; i < 20; i++) { const a = i / 20 * TAU, rr = i % 2 ? 36 : 46; c.lineTo(x + Co(a) * rr, y + S(a) * rr); } c.closePath(); c.fill(); c.stroke(); c.fillStyle = '#0b0b0e'; circ(c, x, y, 10); c.restore(); }
+  if (A.throne) { const [x, y] = A.throne; c.save(); c.fillStyle = '#140c11'; c.beginPath(); c.moveTo(x - 70, y); c.lineTo(x - 70, y - 60); c.lineTo(x - 50, y - 60); c.lineTo(x - 56, y - 200); c.lineTo(x - 28, y - 150); c.lineTo(x, y - 240); c.lineTo(x + 28, y - 150); c.lineTo(x + 56, y - 200); c.lineTo(x + 50, y - 60); c.lineTo(x + 70, y - 60); c.lineTo(x + 70, y); c.fill();
+    c.strokeStyle = C.gold; c.shadowColor = C.gold; c.shadowBlur = 14; c.lineWidth = 2.5; c.stroke(); c.restore(); }
+  A.img = cv; return cv;
+}
+// The ladder cards and the minimap both show the real world art, scaled down.
+function drawArenaMap(ctx, A, X, Y, Wd, Hd, o = {}) {
+  const sc = Math.min(Wd / A.w, Hd / A.h), ox = X + (Wd - A.w * sc) / 2, oy = Y + (Hd - A.h * sc) / 2;
+  ctx.save(); ctx.translate(ox, oy); ctx.scale(sc, sc);
+  const g = ctx.createLinearGradient(0, 0, 0, A.h); g.addColorStop(0, '#24121a'); g.addColorStop(1, '#5a2020'); ctx.fillStyle = g; ctx.fillRect(0, 0, A.w, A.h);
+  ctx.drawImage(renderWorld(A), 0, 0);
+  for (const [x, y] of A.portals) { ctx.save(); ctx.fillStyle = C.crimson; ctx.shadowColor = C.crimson; ctx.shadowBlur = 10; ctx.beginPath(); ctx.ellipse(x, y, 18, 28, 0, 0, TAU); ctx.fill(); ctx.restore(); }
+  for (const [x, y] of A.braz) { ctx.save(); ctx.fillStyle = '#ffb070'; ctx.shadowColor = '#ff7a3c'; ctx.shadowBlur = 12; circ(ctx, x, y - 8, 7); ctx.restore(); }
+  if (o.view) { ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 2 / sc; ctx.strokeRect(o.view[0], o.view[1], o.view[2], o.view[3]); }
+  if (o.dots) for (const d of o.dots) { ctx.fillStyle = d.c; circ(ctx, d.x, d.y, d.r / sc); }
+  ctx.restore();
+}
+ARENAS.forEach((A, i) => mount('ar-' + (i + 1), 300, 360, (ctx, t, dt, r) => {
+  if (r.st.done) return; r.st.done = 1;
+  ctx.fillStyle = '#0c0b0f'; ctx.fillRect(0, 0, 300, 360); ctx.imageSmoothingQuality = 'high';
+  drawArenaMap(ctx, A, 8, 8, 284, 344);
+}));
+
+/* ---------- arsenal ---------- */
+['katana', 'greatsword', 'spear', 'daggers', 'sickle'].forEach(k => mount('wp-' + k, 260, 120, (ctx, t, dt, r) => {
+  const st = r.st; ctx.drawImage(st.bg, 0, 0, 260, 120);
+  const L = WLEN[k], sc = Math.min(1.9, 190 / (L + 40)), sw = S(t * 1.4) * .5;
+  const cx = 130 - Co(-.32 + sw * .2) * L * sc * .4, cy = 66 - S(-.32 + sw * .2) * L * sc * .4 + (k === 'sickle' ? 14 : 0);
+  if (k === 'daggers') blade(ctx, cx + 10, cy + 16, -.1 + sw * .2, k, sc, .7);
+  const w = blade(ctx, cx, cy, -.32 + sw * .2, k, sc, .9);
+  ribbon(ctx, st.tr, w, dt, '255,176,96', .3);
+}, () => ({ bg: stageBg(260, 120, { lx: 130, ly: 60, spread: .6, spires: false, vig: .6 }), tr: [] })));
+
+/* ---------- live arena mock: one endless run ---------- */
+const ZM = 1.3, DA = ARENAS[1], DW = 960, DH = 600, FLOOR = DA.h - TS, GRV = 2100, PS = .66, DEPTH_T = 40;
+const BODY = '"Barlow", system-ui, sans-serif';
+const WEAPONS = ['katana', 'spear', 'greatsword', 'daggers', 'sickle'];
+const WDESC = { katana: 'Fast 3-hit combo. A dash cancels any swing.', spear: 'Longest reach. Down-air pogo bounces off heads.', greatsword: 'Slow, huge arcs. Slams also hit the floor below.', daggers: 'Twin blades and a 5-hit chain. Wall slides cut.', sickle: 'The chain hooks a ledge and pulls you up.' };
+const REACH = { katana: 92, spear: 122, greatsword: 112, daggers: 70, sickle: 108 };
+const STEP = { katana: .13, spear: .14, greatsword: .2, daggers: .085, sickle: .15 };
+const RUNE_DEFS = {
+  'UPDRAFT': { sig: 'GALE', rar: 'rare', d: 'Wall jumps send out a shockwave that launches enemies upward.' },
+  'STORM CUTS': { sig: 'GALE', rar: 'common', d: 'The last hit of a combo throws a crescent of wind.' },
+  'GALE STEP': { sig: 'GALE', rar: 'common', d: 'Dash cooldown is 40% shorter.' },
+  'EMBER DASH': { sig: 'EMBER', rar: 'rare', d: 'Dashes leave a burning trail on the ground.' },
+  'KINDLING': { sig: 'EMBER', rar: 'common', d: 'Kills burst into flame and burn enemies nearby.' },
+  'ECHO STEP': { sig: 'ECHO', rar: 'rare', d: 'Double jumps leave a shadow that slashes once.' },
+  'HEAVY SHADOW': { sig: 'ECHO', rar: 'common', d: 'Slam radius +60% and slam damage +2.' },
+  'IRON VEIL': { sig: 'ECHO', rar: 'rare', d: 'Block the first hit every 10 seconds.' },
+  'BLOODLINE': { sig: 'EDGE', rar: 'rare', d: 'Heal 1 heart for every 12 kills.' },
+  'WHETSTONE': { sig: 'EDGE', rar: 'common', d: 'Combo finishers and slams deal +1 damage.' },
+  'GLASS EDGE': { sig: 'EDGE', rar: 'cursed', d: 'Deal double damage. Your max hearts drop to 3.' },
+  'HUNGER': { sig: 'EMBER', rar: 'cursed', d: 'Gain 50% more wax. You can no longer heal.' }
+};
+const SIGCOL = { GALE: C.cyan, EMBER: '#ff8a5c', ECHO: C.violet, EDGE: C.crimson };
+const SETB = { GALE: 'SET BONUS · WALL JUMPS RESET YOUR DASH', EMBER: 'SET BONUS · BURNING FOES EXPLODE', ECHO: 'SET BONUS · SHADOWS COPY YOUR SLAMS', EDGE: 'SET BONUS · FINISHERS ALWAYS CRIT' };
+const RARCOL = { common: '#9a9289', rare: C.cyan, cursed: C.crimson };
+const SHOP = { MEND: ['MEND', 'Restore 2 hearts.', 70], TEMPER: ['TEMPER', 'Weapon damage +1 for the rest of the run.', 110], PURGE: ['PURGE', 'Remove one curse.', 130], REROLL: ['REROLL', 'Redraw your next rune draft.', 40] };
+const UNLOCKS = [['CHAIN SICKLE', 'NEW WEAPON', 400], ['IRON VEIL', 'NEW RUNE', 520], ['HEAT 1', 'HANGING SPIRE', 650], ['THE ECHO', 'NEW CHARACTER', 900]];
+const roman = n => { let r = ''; for (const [v, k] of [[1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']]) while (n >= v) { r += k; n -= v; } return r; };
+const DEPTH_MSG = { 2: 'GLOOMWINGS JOIN · ENEMIES +30% HP', 3: 'HEXERS AND ELITES APPEAR', 5: 'BRUTES APPEAR · ENEMIES +120% HP', 7: 'EVERY HIT NOW COSTS 2 HEARTS' };
+const armCan = (a, f) => Math.atan2(Co(a), S(a) * f);
+const hpMul = d => 1 + .3 * (d - 1), spMul = d => 1 + .06 * (d - 1);
+const has = (st, n) => st.runes.includes(n);
+const sigCount = (st, s) => st.runes.filter(n => RUNE_DEFS[n].sig === s).length;
+const fmtT = t => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+const seedHex = s => { const h = (s >>> 0).toString(16).toUpperCase().padStart(8, '0'); return h.slice(0, 4) + '-' + h.slice(4); };
+const crownHead = (c2, J2) => { const [x, y, rr] = J2.head;
+  c2.save(); c2.fillStyle = '#16101a'; c2.strokeStyle = 'rgba(255,128,88,.8)'; c2.lineWidth = 1.5;
+  c2.beginPath(); c2.moveTo(x - rr * .95, y - rr * .55); c2.lineTo(x - rr * 1.25, y - rr * 2.1); c2.lineTo(x - rr * .45, y - rr * 1.2); c2.lineTo(x, y - rr * 2.5);
+  c2.lineTo(x + rr * .45, y - rr * 1.2); c2.lineTo(x + rr * 1.25, y - rr * 2.1); c2.lineTo(x + rr * .95, y - rr * .55); c2.closePath(); c2.fill(); c2.stroke();
+  c2.fillStyle = C.crimson; c2.shadowColor = C.crimson; c2.shadowBlur = 12; circ(c2, x, y - rr * 1.25, rr * .16); c2.restore(); };
+function rrect(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+function wrapText(ctx, s, x, y, mw, lh) { let line = '', yy = y; for (const w of s.split(' ')) { const t = line ? line + ' ' + w : w; if (ctx.measureText(t).width > mw && line) { ctx.fillText(line, x, yy); line = w; yy += lh; } else line = t; } ctx.fillText(line, x, yy); }
+function heart(ctx, x, y, s, on) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s); ctx.beginPath(); ctx.moveTo(0, -12); ctx.quadraticCurveTo(9, -1, 8, 4); ctx.arc(0, 4, 8, 0, PI); ctx.quadraticCurveTo(-9, -1, 0, -12);
+  ctx.fillStyle = on ? C.crimson : 'rgba(255,255,255,.08)'; if (on) { ctx.shadowColor = C.crimson; ctx.shadowBlur = 8; } ctx.fill(); ctx.shadowBlur = 0; ctx.lineWidth = 2; ctx.strokeStyle = '#000'; ctx.stroke(); ctx.restore();
+}
+function diamond(ctx, x, y, r, fill, stroke, glow = 0) {
+  ctx.save(); ctx.translate(x, y); ctx.beginPath(); ctx.moveTo(0, -r); ctx.lineTo(r * .72, 0); ctx.lineTo(0, r); ctx.lineTo(-r * .72, 0); ctx.closePath();
+  ctx.fillStyle = fill; if (glow) { ctx.shadowColor = stroke; ctx.shadowBlur = glow; } ctx.fill(); ctx.shadowBlur = 0; if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1.5; ctx.stroke(); } ctx.restore();
+}
+
+mount('cv-demo', DW, DH, (ctx, t, dt, r) => arenaSim(ctx, dt, r), (W, H) => {
+  const st = {
+    bg: stageBg(W, H, { lx: W * .5, ly: H * .45, spread: .8, spires: false, glow: [170, 52, 46], vig: .7, int: .45 }),
+    vig: vignette(W, H, .7), p: { ph: 0 }, cam: { y: FLOOR - 200, x: DA.w / 2 }, P: [], rings: [], tr: [], gh: {}, pfx: {},
+    time: 0, hitstop: 0, shake: 0, tT: 0, targ: null, dashId: 0, meta: { u: 0, have: 290, best: 6, well: false }
+  };
+  newRun(st); return st;
+});
+
+function newRun(st) {
+  st.run = (st.run || 46) + 1; st.seed = Math.floor(Math.random() * 4294967295); st.rng = mulberry(st.seed);
+  Object.assign(st.p, { x: DA.w / 2, y: FLOOR, vx: 0, vy: 0, f: 1, ground: true, dj: false, flip: 0, dash: 0, dashCd: 0, atk: null, slam: false, hurt: 0, land: 0, wall: 0, slideT: 0, kick: 0, dropT: 0, plat: 'solid', pre: 0, stretch: 0, steer: null, forceT: 0 });
+  Object.assign(st, { E: [], G: [], N: [], proj: [], cres: [], fire: [], shades: [], quakes: [], rt: 0, dp: 0, depth: 1, nextBoss: 4, boss: null, bossIntro: 0, bossName: '',
+    kills: 0, bosses: 0, lvl: 1, xp: 0, runWax: 0, hidden: true, hp: 5, maxHp: 5, temper: 0, runes: [], healK: 0, veilT: 0, spawnT: 1.2, dying: 0, flow: 0, flowT: 0,
+    banner: null, pendDraft: 0, pendShop: 0, arenaNow: 0, targ: null, weapon: 'katana' });
+  const pool = WEAPONS.filter(w => w !== 'sickle' || st.meta.u > 0);
+  const a = pool[Math.floor(st.rng() * pool.length)]; let b; do b = pool[Math.floor(st.rng() * pool.length)]; while (b === a);
+  st.ov = interactive({ kind: 'weapon', t: 0, at: 1.9, dur: 2.8, opts: [a, b], pick: st.meta.u > 0 && b === 'sickle' ? 1 : a === 'sickle' ? 0 : st.rng() < .5 ? 0 : 1 });
+}
+function interactive(o) { o.at = 1e9; o.dur = 1e9; o.pick = Math.max(0, o.pick); return o; }
+function openDraft(st) {
+  const pool = Object.keys(RUNE_DEFS).filter(n => !st.runes.includes(n) && (n !== 'IRON VEIL' || st.meta.u > 1));
+  const opts = [];
+  while (opts.length < 3 && pool.length) opts.push(pool.splice(Math.floor(st.rng() * pool.length), 1)[0]);
+  const sc = opts.map(n => { const d = RUNE_DEFS[n]; return sigCount(st, d.sig) * 2 + (d.rar === 'rare' ? 1 : 0) + (d.rar === 'cursed' ? (st.depth >= 3 && st.hp >= 3 ? 3 : -9) : 0) + st.rng() * .8; });
+  st.ov = interactive({ kind: 'draft', t: 0, at: 1.8, dur: 2.7, opts, pick: sc.indexOf(Math.max(...sc)), lvl: st.lvl });
+}
+function openShop(st) {
+  const cursed = st.runes.some(n => RUNE_DEFS[n].rar === 'cursed');
+  const opts = [SHOP.MEND, SHOP.TEMPER, cursed ? SHOP.PURGE : SHOP.REROLL];
+  let pick = -1;
+  if (st.hp <= st.maxHp - 2 && st.runWax >= SHOP.MEND[2]) pick = 0; else if (st.runWax >= SHOP.TEMPER[2]) pick = 1; else if (st.runWax >= SHOP.MEND[2]) pick = 0;
+  st.ov = interactive({ kind: 'shop', t: 0, at: 1.8, dur: 2.7, opts, pick });
+}
+function openOver(st) {
+  const m = st.meta, U = UNLOCKS[m.u % UNLOCKS.length];
+  const kept = Math.round(st.runWax * .4) + st.bosses * 50, from = m.have / U[2];
+  m.have += kept; let unlocked = null, to = m.have / U[2];
+  if (m.have >= U[2]) { unlocked = U; m.have -= U[2]; m.u++; to = 1; }
+  const newBest = st.depth > m.best; m.best = Math.max(m.best, st.depth);
+  st.ov = { kind: 'over', t: 0, dur: 30, run: st.run, seed: st.seed, depth: st.depth, best: m.best, newBest, time: st.rt, bosses: st.bosses, kills: st.kills,
+    wax: st.runWax, kept, from, to, U, unlocked, next: UNLOCKS[m.u % UNLOCKS.length], arena: st.arenaNow, build: [st.weapon].concat(st.runes) };
+}
+function applyPick(st) {
+  const o = st.ov, v = o.opts[o.pick];
+  if (o.kind === 'weapon') { st.weapon = v; st.banner = { text: 'DESCEND', sub: `${v.toUpperCase()} · DEPTH I · FIFTEEN CANDLES · NO END`, t: 1.7 }; }
+  else if (o.kind === 'draft') {
+    st.runes.push(v);
+    if (v === 'GLASS EDGE') { st.maxHp = 3; st.hp = Math.min(st.hp, 3); }
+    const s = RUNE_DEFS[v].sig;
+    st.banner = sigCount(st, s) === 3 ? { text: `${s} SET COMPLETE`, sub: SETB[s], t: 2, col: SIGCOL[s] } : { text: v, sub: RUNE_DEFS[v].rar === 'cursed' ? 'CURSED · ' + RUNE_DEFS[v].d.toUpperCase() : `${s} SIGIL ${sigCount(st, s)}/3`, t: 1.3, col: RARCOL[RUNE_DEFS[v].rar] };
+  } else if (o.kind === 'shop' && v) {
+    st.runWax -= v[2];
+    if (v[0] === 'MEND') st.hp = Math.min(st.maxHp, st.hp + 2);
+    if (v[0] === 'TEMPER') st.temper++;
+    if (v[0] === 'PURGE') { const i = st.runes.findIndex(n => RUNE_DEFS[n].rar === 'cursed'); if (i >= 0) { if (st.runes[i] === 'GLASS EDGE') st.maxHp = 5; st.runes.splice(i, 1); } }
+  }
+}
+
+// Tile collision: rock is solid on every side, bridges and platforms are one-way from below.
+function arenaMove(b, dt, w, h, drop) {
+  const A = DA;
+  b.x += b.vx * dt;
+  const r0 = Math.floor((b.y - h + 2) / TS), r1 = Math.floor((b.y - 2) / TS);
+  const hitCol = cc => { for (let r = r0; r <= r1; r++) if (isSolid(A, cc, r)) return true; return false; };
+  if (b.vx >= 0 && hitCol(Math.floor((b.x + w / 2) / TS))) b.x = Math.floor((b.x + w / 2) / TS) * TS - w / 2 - .01;
+  if (b.vx <= 0 && hitCol(Math.floor((b.x - w / 2) / TS))) b.x = (Math.floor((b.x - w / 2) / TS) + 1) * TS + w / 2 + .01;
+  const rm = Math.floor((b.y - h * .5) / TS);
+  b.wall = isSolid(A, Math.floor((b.x + w / 2 + 2) / TS), rm) ? 1 : isSolid(A, Math.floor((b.x - w / 2 - 2) / TS), rm) ? -1 : 0;
+  const py = b.y; b.y += b.vy * dt; b.ground = false;
+  const cA = Math.floor((b.x - w / 2 + 1) / TS), cB = Math.floor((b.x + w / 2 - 1) / TS);
+  if (b.vy >= 0) {
+    for (let r = Math.ceil((py - .5) / TS); r <= Math.floor(b.y / TS); r++) {
+      let solid = false, one = false;
+      for (let cc = cA; cc <= cB; cc++) { if (isSolid(A, cc, r)) solid = true; else if (isOne(A, cc, r)) one = true; }
+      if (solid || (one && !drop)) { b.y = r * TS; b.vy = 0; b.ground = true; b.plat = solid ? 'solid' : 'one'; return; }
+    }
+  } else {
+    const rh = Math.floor((b.y - h) / TS);
+    for (let cc = cA; cc <= cB; cc++) if (isSolid(A, cc, rh)) { b.y = (rh + 1) * TS + h; b.vy = 0; break; }
+  }
+}
+function aSpawn(st) {
+  // portals near the player open first, so the fight follows you up the tower
+  const d = st.depth, byD = DA.portals.map((q, i) => [Math.hypot(q[0] - st.p.x, (q[1] - st.p.y) * 1.4), i]).sort((a, b) => a[0] - b[0]);
+  const pi = byD[Math.floor(Math.random() * Math.min(3, byD.length))][1], [x, y] = DA.portals[pi], q = Math.random();
+  const type = d >= 3 && q < .14 ? 'sp' : d >= 2 && q < .34 ? 'bat' : d >= 5 && q < .48 ? 'br' : 'sh';
+  const elite = d >= 3 && Math.random() < .04 + d * .025 ? ['SWIFT', 'SHIELDED', 'VOLATILE'][Math.floor(Math.random() * 3)] : null;
+  const hp = { sh: 3, bat: 1, br: 9, sp: 2 }[type] * hpMul(d) * (elite ? 2.2 : 1);
+  st.pfx[pi] = .6;
+  st.E.push({ type, elite, x, y: y + 22, vx: rnd(-40, 40), vy: 0, hp, mhp: hp, o: rnd(0, 20), f: 1, hit: 0, ground: false, sc: elite ? 1.18 : 1,
+    w: type === 'br' ? 30 : 18, h: (type === 'br' ? 70 : 52) * (elite ? 1.18 : 1), shoot: rnd(1, 2.4), plat: null, burnT: 0 });
+}
+function spawnBoss(st) {
+  const hp = 20 * hpMul(st.depth) * (st.run === 47 ? .7 : 1), x = clamp(st.p.x + (st.p.x < DA.w / 2 ? 420 : -420), 360, DA.w - 360);
+  st.boss = { type: 'boss', king: st.bosses % 2 === 1, x, y: FLOOR - 200, vx: 0, vy: 0, hp, mhp: hp, o: 0, f: -1, hit: 0, ground: false, w: 44, h: 120, ai: 'walk', at: 1.6, plat: null, burnT: 0, landed: 0 };
+  st.E.push(st.boss);
+}
+
+function arenaSim(ctx, rdt, r) {
+  pollInput();
+  const st = r.st, W = r.W, H = r.H, p = st.p;
+  if (st.ov) {
+    const o = st.ov; o.t += rdt;
+    if (o.kind !== 'over' && o.t < o.at && o.t > .35) {
+      const n = o.opts.length;
+      if (PR.left) o.pick = (o.pick + n - 1) % n;
+      if (PR.right) o.pick = (o.pick + 1) % n;
+      if (PR.jump || PR.attack) { o.at = o.t; o.dur = o.t + .9; }
+      else if (PR.dash && o.kind === 'shop') { o.pick = -1; o.at = o.t; o.dur = o.t + .9; }
+    } else if (o.kind === 'over' && o.t > 2.5 && (PR.jump || PR.attack)) o.dur = o.t;
+    if (o.kind !== 'over' && !o.done && o.t >= o.at) { o.done = 1; applyPick(st); }
+    if (o.t >= o.dur) { st.ov = null; if (o.kind === 'over') newRun(st); }
+  }
+  let dt = st.ov ? 0 : rdt;
+  if (st.hitstop > 0 && dt > 0) { st.hitstop -= rdt; dt = 0; }
+  if (st.dying > 0 && dt > 0) { st.dying -= dt; dt *= .3; if (st.dying <= 0) openOver(st); }
+  st.shake = Math.max(0, st.shake - rdt);
+  st.time += dt;
+  const live = st.E.filter(e => !e.dead);
+  const glass = has(st, 'GLASS EDGE');
+  const addFlow = () => { st.flow = Math.min(30, st.flow + 1); st.flowT = 2.4; };
+  const hitPlayer = n => {
+    if (p.hurt > 0 || p.dash > 0 || st.dying || st.ov) return;
+    if (has(st, 'IRON VEIL') && st.veilT <= 0) { st.veilT = 10; p.hurt = .5; st.rings.push({ x: p.x, y: p.y - 28, t: 0, kind: 'veil' }); return; }
+    st.hp -= n; p.hurt = st.run === 47 ? 2.2 : 1.6; // the first run a visitor sees is a little kinder, so it reaches the boss kill st.flow = 0; st.shake = .16; st.hitstop = .06;
+    st.N.push({ x: p.x, y: p.y - 74, v: `-${n} ♥`, life: .9, crit: true, col: C.crimson });
+    if (st.hp <= 0 && st.hidden) {
+      // the hidden candle: brought back once, like the last candle at the end of Tenebrae
+      st.hidden = false; st.hp = Math.ceil(st.maxHp / 2); p.hurt = 2.2; st.shake = .3; st.hitstop = .2;
+      st.rings.push({ x: p.x, y: p.y - 28, t: 0, kind: 'slam', big: 1 }, { x: p.x, y: p.y - 28, t: 0, kind: 'ember' });
+      st.banner = { text: 'THE HIDDEN CANDLE', sub: 'RETURNED ONCE · IT WILL NOT RETURN AGAIN', t: 2, col: C.gold };
+      for (const e of live) if (Math.hypot(e.x - p.x, e.y - p.y) < 200) hurt(e, 3, Math.sign(e.x - p.x) * 420, -420, true);
+    }
+    if (st.hp <= 0) { st.hp = 0; st.dying = 1.8; st.banner = null; st.pendDraft = st.pendShop = 0; shadeBurst(st.P, p.x, p.y - 30, 1.3, 40); }
+  };
+  const kill = e => {
+    e.dead = true; st.kills++;
+    const boss = e.type === 'boss';
+    shadeBurst(st.P, e.x, e.y - e.h * .5, boss ? 2.2 : .8, boss ? 70 : 18);
+    const n = boss ? 26 : e.elite ? 5 : e.type === 'br' ? 4 : 2;
+    for (let i = 0; i < n; i++) st.G.push({ x: e.x, y: e.y - e.h * .5, vx: rnd(-160, 160) * (boss ? 1.6 : 1), vy: rnd(-520, -220), t: 0 });
+    if (boss) {
+      st.boss = null; st.bosses++; st.nextBoss = st.depth + 4; st.hitstop = .25; st.shake = .5; st.quakes = [];
+      const first = !st.meta.well; st.meta.well = true; if (first) st.arenaNow = 1;
+      st.rings.push({ x: e.x, y: e.y, t: 0, kind: 'slam', big: 1 });
+      st.banner = { text: `${st.bossName.replace('THE ', '')} SLAIN`, sub: first ? 'ARENA UNLOCKED · THE DROWNED WELL' : 'BOSS SIGIL +1 · THE CLIMB GOES ON', t: 2.4, col: C.gold };
+      st.pendShop = 2.4;
+    }
+    if (e.elite === 'VOLATILE') { st.rings.push({ x: e.x, y: e.y - 20, t: 0, kind: 'ember' }); if (Math.hypot(p.x - e.x, p.y - e.y) < 80) hitPlayer(1); }
+    if (has(st, 'KINDLING')) { st.rings.push({ x: e.x, y: e.y - 20, t: 0, kind: 'ember' }); for (const o of live) if (!o.dead && Math.hypot(o.x - e.x, o.y - e.y) < 90) hurt(o, 1, o.vx, 0); }
+    if (has(st, 'BLOODLINE') && !has(st, 'HUNGER') && ++st.healK >= 12) { st.healK = 0; if (st.hp < st.maxHp) { st.hp++; st.N.push({ x: p.x, y: p.y - 80, v: '+1 ♥', life: 1, crit: true, col: C.crimson }); } }
+  };
+  const hurt = (e, dmg, kx, ky, crit) => {
+    if (e.dead) return;
+    dmg = dmg * (glass ? 2 : 1) + st.temper + (crit && has(st, 'WHETSTONE') ? 1 : 0);
+    e.hp -= dmg; e.hit = .12;
+    if (e.type === 'boss') e.vx += kx * .05; else { e.vx = kx; if (ky) { e.vy = ky; e.ground = false; } }
+    addFlow(); st.hitstop = Math.max(st.hitstop, .05);
+    st.N.push({ x: e.x + rnd(-6, 6), y: e.y - e.h - 12, v: Math.round(dmg * 11 + rnd(0, 6)), life: .7, crit });
+    sparks(st.P, e.x, e.y - e.h * .55, .7, 8);
+    if (e.hp <= 0) kill(e);
+  };
+
+  if (dt > 0) {
+    p.dashCd -= dt; p.land = Math.max(0, p.land - dt); p.hurt = Math.max(0, p.hurt - dt); p.flip = Math.max(0, p.flip - dt); p.kick = Math.max(0, p.kick - dt); p.dropT = Math.max(0, p.dropT - dt); p.stretch = Math.max(0, (p.stretch || 0) - dt);
+    st.veilT -= dt; if (!st.dying) st.rt += dt;
+    st.flowT -= dt; if (st.flowT <= 0) st.flow = Math.max(0, st.flow - dt * 8);
+    for (const k in st.pfx) st.pfx[k] = Math.max(0, st.pfx[k] - dt);
+    if (st.banner && (st.banner.t -= dt) <= 0) st.banner = null;
+    if (st.pendShop > 0) { if ((st.pendShop -= dt) <= 0) openShop(st); }
+    else if (st.pendDraft > 0 && (st.pendDraft -= dt) <= 0) openDraft(st);
+    /* endless threat: depth rises on a timer, a boss every 4 depths */
+    if (!st.dying) {
+      if (st.bossIntro > 0) { if ((st.bossIntro -= dt) <= 0) spawnBoss(st); }
+      else if (!st.boss && (st.dp += dt) >= DEPTH_T) {
+        st.dp = 0; st.depth++;
+        if (st.depth === st.nextBoss) { st.bossIntro = 2.2; st.bossName = st.bosses % 2 ? 'THE HOLLOW KING' : 'THE CHAIN WARDEN'; st.shake = .7; st.banner = { text: `DEPTH ${roman(st.depth)} · STREPITUS`, sub: `${st.bossName} RISES FROM BELOW`, t: 2.2, col: C.crimson }; }
+        else st.banner = { text: `DEPTH ${roman(st.depth)} · A CANDLE GOES OUT`, sub: DEPTH_MSG[st.depth] || `ENEMIES +${Math.round((hpMul(st.depth) - 1) * 100)}% HP · FASTER SPAWNS`, t: 1.5 };
+      }
+      const cap = st.boss ? 3 : st.bossIntro > 0 ? 0 : Math.min(22, 5 + st.depth * 2);
+      if ((st.spawnT -= dt) <= 0 && live.length < cap) { st.spawnT = Math.max(.3, 1.05 - st.depth * .08) * (st.boss ? 2.6 : 1); aSpawn(st); }
+    }
+    /* AI player */
+    st.tT -= dt;
+    if (st.tT <= 0 || !st.targ || st.targ.dead) {
+      st.tT = .6; let bc = 1e9; st.targ = null;
+      for (const e of live) { const c = Math.abs(e.x - p.x) + Math.abs(e.y - p.y) * (e.type === 'bat' ? 1.2 : e.type === 'boss' ? .5 : 3) - (e.type === 'boss' ? 260 : 0); if (c < bc) { bc = c; st.targ = e; } }
+    }
+    const T = st.targ, wasGround = p.ground;
+    let dir = 0;
+    const dust = () => { for (let i = 0; i < 7; i++) emit(st.P, { x: p.x, y: p.y, vx: rnd(-90, 90), vy: rnd(-50, 0), drag: 3, r: rnd(3, 6), col: 'rgba(170,120,105,.35)', life: .4, shrink: 1 }); };
+    const jump = v => { if (p.pre > 0 || !p.ground) return; p.pre = .075; p.preV = v; };
+    const headClear = (x, y0, y1) => { const cc = Math.floor(x / TS); for (let r = Math.floor((y1 - 64) / TS); r <= Math.floor((y0 - 1) / TS); r++) if (isSolid(DA, cc, r)) return false; return true; };
+    const near = live.filter(e => (e.x - p.x) * p.f > -14 && Math.abs(e.x - p.x) < REACH[st.weapon] - 8 + (e.type === 'boss' ? 20 : 0) && Math.abs((e.y - e.h / 2) - (p.y - 28)) < 64);
+    const quakeNear = p.ground && st.quakes.some(q => { const qx = q.x + q.dir * q.t * 560, d = (p.x - qx) * q.dir; return Math.abs(q.y - p.y) < 4 && d > 0 && d < 120; });
+    // if the player hasn't really moved for a while, push off in a new direction
+    if ((st.stuckT = (st.stuckT || 0) + dt) > 2.2) { if (T && !p.atk && Math.hypot(p.x - (st.sx || 0), p.y - (st.sy || 0)) < 50) { p.force = p.x < DA.w / 2 ? 1 : -1; p.forceT = 1; } st.stuckT = 0; st.sx = p.x; st.sy = p.y; }
+    p.forceT = Math.max(0, (p.forceT || 0) - dt);
+    if (p.pre > 0 && (p.pre -= dt) <= 0) { p.vy = p.preV; p.ground = false; p.stretch = .16; dust(); }
+    if (st.dying) { p.vx *= Math.max(0, 1 - dt * 6); p.vy += GRV * dt; p.atk = null; p.slam = false; p.dash = 0; p.pre = 0; }
+    else if (p.dash > 0) {
+      p.dash -= dt; p.vx = 860 * p.f; p.vy = 0;
+      if (has(st, 'EMBER DASH') && (!st.fire.length || Math.abs(st.fire[st.fire.length - 1].x - p.x) > 18)) st.fire.push({ x: p.x, y: p.y, t: 0 });
+      for (const e of live) if (e.dashed !== st.dashId && Math.abs(e.x - p.x) < 34 && Math.abs(e.y - p.y) < 70) { e.dashed = st.dashId; hurt(e, 2, p.f * 260, -260, true); }
+    } else if (p.slam) { p.vx = 0; p.vy = 1750; }
+    else {
+      // ---- player control ----
+      dir = (IN.right ? 1 : 0) - (IN.left ? 1 : 0);
+      if (p.ground) { p.dj = false; p.coy = .1; } else p.coy = Math.max(0, (p.coy || 0) - dt);
+      p.buf = PR.jump ? .12 : Math.max(0, (p.buf || 0) - dt);
+      if (PR.dash && p.dashCd <= 0 && !(p.airDash && !p.ground)) {
+        if (dir) p.f = dir; p.dash = .2; p.dashCd = has(st, 'GALE STEP') ? .45 : .6; st.dashId++; p.atk = null; if (!p.ground) p.airDash = true;
+      }
+      if (p.ground) p.airDash = false;
+      if (PR.attack) {
+        if (!p.ground && IN.down) { p.slam = true; p.atk = null; }
+        else if (!p.atk) { p.atk = { step: 0, t: 0, hit: false, q: false }; if (dir) p.f = dir; }
+        else p.atk.q = true;
+      }
+      if (!p.ground && p.wall && p.wall === dir && p.vy > 0) {
+        p.vy = Math.min(p.vy, 170); p.slideT += dt;
+        if (Math.random() < dt * 30) sparks(st.P, p.x + p.wall * 8, p.y - 30, .4, 1);
+      } else p.slideT = 0;
+      if (p.buf > 0) {
+        if (p.ground && IN.down && p.plat === 'one') { p.buf = 0; p.dropT = .22; p.ground = false; p.vy = 80; }
+        else if (p.ground || p.coy > 0) { p.buf = 0; p.coy = 0; p.vy = -800; p.ground = false; p.stretch = .16; dust(); }
+        else if (p.wall) {
+          const wl = p.wall; p.buf = 0; p.vy = -800; p.vx = -wl * 430; p.f = -wl; p.kick = .22; p.dj = false; p.slideT = 0;
+          for (let i = 0; i < 8; i++) emit(st.P, { x: p.x + wl * 8, y: p.y - 10, vx: -wl * rnd(20, 120), vy: rnd(-60, 60), drag: 3, r: rnd(3, 6), col: 'rgba(170,120,105,.35)', life: .4, shrink: 1 });
+          if (has(st, 'UPDRAFT')) { st.rings.push({ x: p.x + wl * 8, y: p.y - 30, t: 0, kind: 'gale' }); st.shake = .12; for (const e of live) if (Math.abs(e.x - p.x) < 160 && Math.abs(e.y - p.y) < 170) hurt(e, 2, -wl * 220, -720, true); }
+          if (sigCount(st, 'GALE') >= 3) p.dashCd = 0;
+        } else if (!p.dj) {
+          p.buf = 0; p.vy = -760; p.dj = true; p.flip = .4; st.rings.push({ x: p.x, y: p.y, t: 0, kind: 'puff' }, { x: p.x, y: p.y + 4, t: 0, kind: 'wing', f: p.f });
+          for (let i = 0; i < 12; i++) { const a = rnd(0, TAU), v = rnd(50, 130); emit(st.P, { x: p.x, y: p.y, vx: Co(a) * v, vy: S(a) * v * .4 + 30, drag: 3, r: rnd(2.5, 5), col: i % 3 ? '#1b0c10' : C.crimson, glow: i % 3 ? 0 : 6, life: rnd(.35, .6), shrink: 1 }); }
+          if (has(st, 'ECHO STEP')) { st.shades.push({ x: p.x, y: p.y, f: p.f, t: 0 }); for (const e of live) if (Math.hypot(e.x - p.x, e.y - e.h / 2 - p.y + 28) < 115) hurt(e, 2, p.f * 200, -300, true); }
+        }
+      }
+      if (!IN.jump && p.vy < -300 && p.flip <= 0 && p.kick <= 0 && !p.cut) { p.vy *= .5; p.cut = true; }
+      if (p.ground || p.vy >= 0) p.cut = false;
+      if (p.kick <= 0) { const sp = p.atk ? 80 : 310; p.vx = lerp(p.vx, dir * sp, Math.min(1, dt * (p.ground ? 12 : 6))); if (dir && !p.atk) p.f = dir; }
+      p.vy += GRV * (p.vy > 0 ? 1.3 : 1) * dt;
+    }
+    if (p.atk) {
+      const a = p.atk, stepT = STEP[st.weapon];
+      if (!a.hit) { a.hit = true;
+        for (const e of live) { const dx = (e.x - p.x) * p.f; if (dx > -14 && dx < REACH[st.weapon] + (e.type === 'boss' ? 20 : 0) && Math.abs((e.y - e.h / 2) - (p.y - 28)) < 72) hurt(e, a.step === 2 ? 2 : 1, p.f * (a.step === 2 ? 240 : 130), a.step === 2 ? -760 : -140, a.step === 2); }
+        if (a.step === 2 && has(st, 'STORM CUTS')) st.cres.push({ x: p.x + p.f * 24, y: p.y - 32, f: p.f, t: 0, hit: new Set() }); }
+      a.t += dt; if (a.t > stepT) { if (a.q && a.step < 2) { a.step++; a.t = 0; a.hit = false; a.q = false; } else if (a.t > stepT + .12 || a.step >= 2) p.atk = null; }
+    }
+    if (!p.ground) p.fallV = p.vy;
+    arenaMove(p, dt, 16, 56, p.dropT > 0);
+    if (p.slam && p.ground) {
+      const heavy = has(st, 'HEAVY SHADOW'), rad = heavy ? 240 : 150;
+      p.slam = false; st.shake = heavy ? .4 : .28; st.hitstop = .08; st.rings.push({ x: p.x, y: p.y, t: 0, kind: 'slam', heavy });
+      let any = false;
+      for (const e of live) { const dx = e.x - p.x; if (Math.abs(dx) < rad && Math.abs(e.y - p.y) < 70) { any = true; hurt(e, heavy ? 5 : 3, Math.sign(dx || 1) * 380, -580, true); } }
+      for (let i = 0; i < 18; i++) { const a = rnd(PI * 1.05, TAU - .05), v = rnd(120, 360); emit(st.P, { x: p.x + rnd(-20, 20), y: p.y - 3, vx: Co(a) * v, vy: S(a) * v, g: 800, r: rnd(2, 4), col: i % 3 ? '#3a2e30' : heavy ? C.violet : C.crimson, glow: i % 3 ? 0 : 6, kind: 'shred', life: rnd(.4, .8) }); }
+      if (any) { p.vy = -640; p.ground = false; p.dj = false; } else p.land = .2;
+    } else if (p.ground && !wasGround) { p.land = clamp((p.fallV || 0) / 1400 * .16, .05, .16); for (let i = 0; i < 6; i++) emit(st.P, { x: p.x + rnd(-8, 8), y: p.y - 2, vx: rnd(-90, 90), vy: rnd(-40, -5), drag: 3, r: rnd(3, 6), col: 'rgba(170,120,105,.35)', life: .45, shrink: 1 }); }
+    if (p.ground) p.ph += dt * Math.abs(p.vx) * .043;
+    /* rune effects in the world */
+    for (const c of st.cres) { c.t += dt; c.x += c.f * 820 * dt;
+      for (const e of live) if (!c.hit.has(e) && Math.abs(e.x - c.x) < 30 && Math.abs(e.y - e.h / 2 - c.y) < 50) { c.hit.add(e); hurt(e, 1, c.f * 200, -220, false); } }
+    st.cres = st.cres.filter(c => c.t < .5 && c.x > 40 && c.x < DA.w - 40);
+    for (const fl of st.fire) { fl.t += dt; if (Math.random() < dt * 10) emit(st.P, { x: fl.x + rnd(-8, 8), y: fl.y - 4, vx: rnd(-10, 10), vy: rnd(-90, -40), r: rnd(1.5, 3), col: '#ff8a5c', glow: 8, life: rnd(.3, .6), shrink: 1 }); }
+    st.fire = st.fire.filter(fl => fl.t < 1.4);
+    for (const s of st.shades) s.t += dt;
+    st.shades = st.shades.filter(s => s.t < .5);
+    for (const q of st.quakes) { q.t += dt; const qx = q.x + q.dir * q.t * 560;
+      if (isSolid(DA, Math.floor(qx / TS), Math.floor((q.y - 20) / TS)) || !isSolid(DA, Math.floor(qx / TS), Math.floor((q.y + 20) / TS))) { q.t = 9; continue; }
+      if (Math.random() < .7) emit(st.P, { x: qx, y: q.y - 2, vx: rnd(-40, 40), vy: rnd(-260, -120), g: 900, r: rnd(2, 4), col: Math.random() < .3 ? C.crimson : '#2a2228', glow: 0, kind: 'shred', life: .5 });
+      if (p.ground && Math.abs(q.y - p.y) < 4 && Math.abs(qx - p.x) < 24) hitPlayer(1); }
+    st.quakes = st.quakes.filter(q => q.t < 1.1);
+    /* enemies */
+    const dmgN = st.depth >= 7 ? 2 : 1;
+    for (const e of live) {
+      e.hit = Math.max(0, e.hit - dt);
+      if (st.fire.length && (e.burnT -= dt) <= 0 && st.fire.some(fl => Math.abs(fl.x - e.x) < 22 && Math.abs(fl.y - e.y) < 40)) { e.burnT = .35; hurt(e, 1, e.vx, 0); }
+      if (e.dead) continue;
+      const sm = spMul(st.depth) * (e.elite === 'SWIFT' ? 1.6 : 1);
+      if (e.type === 'boss') {
+        const dx = p.x - e.x; e.at -= dt;
+        if (e.ground && !e.landed) { e.landed = 1; st.shake = .45; st.rings.push({ x: e.x, y: e.y, t: 0, kind: 'slam', big: 1 }); }
+        if (e.ai === 'walk') { e.f = Math.sign(dx) || 1; e.vx = lerp(e.vx, e.f * 70 * sm, Math.min(1, dt * 3)); if (e.at <= 0 && e.ground) { e.ai = 'wind'; e.at = .75; } }
+        else if (e.ai === 'wind') { e.vx *= Math.max(0, 1 - dt * 10); if (e.at <= 0) { e.ai = 'smash'; e.at = .5; st.shake = .35; const sx = e.x + e.f * 60; st.quakes.push({ x: sx, y: e.y, t: 0, dir: -1 }, { x: sx, y: e.y, t: 0, dir: 1 }); st.rings.push({ x: sx, y: e.y, t: 0, kind: 'slam', big: 1, red: 1 }); } }
+        else if (e.ai === 'smash' && e.at <= 0) { e.ai = 'walk'; e.at = rnd(1.6, 2.4); }
+        e.vy += GRV * dt; arenaMove(e, dt, e.w, e.h, true);
+      } else if (e.type === 'bat') {
+        const tx = p.x + S(st.time + e.o) * 60, ty = p.y - 70 + S(st.time * 3 + e.o) * 40;
+        e.x += clamp(tx - e.x, -1, 1) * 140 * sm * dt + e.vx * dt; e.y += (ty - e.y) * dt * 1.4 + e.vy * dt;
+        e.vx *= Math.max(0, 1 - dt * 5); e.vy *= Math.max(0, 1 - dt * 5); e.f = tx > e.x ? 1 : -1;
+        if (isSolid(DA, Math.floor(e.x / TS), Math.floor((e.y - 16) / TS))) { e.x = e.px ?? e.x; e.y = e.py ?? e.y; } e.px = e.x; e.py = e.y;
+      } else {
+        const dx = p.x - e.x, dy = p.y - e.y;
+        if (e.ground && Math.abs(e.vx) < 100) {
+          if (e.type === 'sp') { e.vx = 0; e.f = Math.sign(dx) || 1; e.shoot -= dt;
+            if (e.shoot <= 0 && Math.abs(dx) < 620) { e.shoot = rnd(2, 3) / sm; const tt = .9; st.proj.push({ x: e.x + e.f * 14, y: e.y - 92, vx: dx / tt, vy: (dy - 40) / tt - .5 * 900 * tt, life: 3 }); } }
+          else {
+            const sp = (e.type === 'br' ? 42 : 70) * sm;
+            if (Math.abs(dy) < 50 || dy > 0) { e.f = Math.sign(dx) || -1; e.vx = lerp(e.vx, e.f * sp, Math.min(1, dt * 4)); }
+            else { const ac = Math.floor((e.x + e.f * (e.w / 2 + 6)) / TS), ar = Math.round(e.y / TS); if (!isSolid(DA, ac, ar) && !isOne(DA, ac, ar)) e.f = -e.f; e.vx = lerp(e.vx, e.f * sp * .6, Math.min(1, dt * 4)); }
+            if (e.wall === e.f && e.type !== 'br') { e.vy = -640; e.ground = false; }
+          }
+        } else if (e.ground) e.vx *= Math.max(0, 1 - dt * 7);
+        e.vy += GRV * dt;
+        arenaMove(e, dt, e.w, e.h, false);
+      }
+      const reach = e.type === 'boss' ? 34 : 20;
+      if (!p.slam && e.hit <= 0 && Math.abs(e.vx) < 200 && Math.abs(e.x - p.x) < reach && Math.abs((e.y - e.h / 2) - (p.y - 28)) < (e.type === 'boss' ? 70 : 40)) hitPlayer(e.type === 'boss' ? 1 + (st.depth >= 8 ? 1 : 0) : dmgN);
+    }
+    st.E = st.E.filter(e => !e.dead);
+    for (const q of st.proj) { q.vy += 900 * dt; q.x += q.vx * dt; q.y += q.vy * dt; q.life -= dt;
+      if (Math.random() < .6) emit(st.P, { x: q.x, y: q.y, vx: rnd(-20, 20), vy: rnd(-20, 20), r: rnd(2, 3.5), col: C.violet, glow: 8, life: .3, shrink: 1, a: .8 });
+      if (p.hurt <= 0 && p.dash <= 0 && Math.hypot(q.x - p.x, q.y - (p.y - 28)) < 22) { q.life = 0; hitPlayer(dmgN); }
+      if (isSolid(DA, Math.floor(q.x / TS), Math.floor(q.y / TS)) || q.life <= 0) { q.life = 0; for (let i = 0; i < 8; i++) emit(st.P, { x: q.x, y: q.y, vx: rnd(-120, 120), vy: rnd(-160, -20), g: 500, r: rnd(2, 3.5), col: C.violet, glow: 8, life: .5 }); } }
+    st.proj = st.proj.filter(q => q.life > 0);
+    /* wax drops: run currency and XP */
+    for (const g of st.G) {
+      g.t += dt; const dx = p.x - g.x, dy = (p.y - 28) - g.y, d = Math.hypot(dx, dy) || 1;
+      if (g.t > .35 && d < 220 && !st.dying) { g.vx = dx / d * 560; g.vy = dy / d * 560; } else g.vy += GRV * .6 * dt;
+      g.x += g.vx * dt; g.y += g.vy * dt; const gr = Math.floor((g.y + 6) / TS); if (g.vy > 0 && (isSolid(DA, Math.floor(g.x / TS), gr) || isOne(DA, Math.floor(g.x / TS), gr)) && g.t < .35) { g.y = gr * TS - 6; g.vy = 0; g.vx *= .5; }
+      if (d < 18 && !st.dying) { g.got = 1; st.runWax += has(st, 'HUNGER') ? 3 : 2; st.xp++;
+        emit(st.P, { x: g.x, y: g.y, vx: rnd(-40, 40), vy: rnd(-60, -20), r: 2, col: C.cyan, glow: 8, life: .3 });
+        const need = 8 + st.lvl * 5;
+        if (st.xp >= need) { st.xp -= need; st.lvl++; st.pendDraft = .45; st.N.push({ x: p.x, y: p.y - 92, v: 'LEVEL UP', life: 1.1, crit: true, col: C.cyan }); st.rings.push({ x: p.x, y: p.y - 28, t: 0, kind: 'veil' }); } }
+      if (g.t > 5) g.got = 1;
+    }
+    st.G = st.G.filter(g => !g.got);
+    st.cam.y = lerp(st.cam.y, clamp(p.y - 60, H / 2 / ZM, DA.h - H / 2 / ZM), Math.min(1, rdt * 4));
+    st.cam.x = lerp(st.cam.x, clamp(p.x, W / 2 / ZM, DA.w - W / 2 / ZM), Math.min(1, rdt * 4));
+  }
+
+  /* ---- draw ---- */
+  const vdt = dt;
+  ctx.save();
+  if (st.shake > 0) ctx.translate(rnd(-1, 1) * st.shake * 30, rnd(-1, 1) * st.shake * 30);
+  ctx.drawImage(st.bg, -12, -12, W + 24, H + 24);
+  const par = st.cam.y * .35;
+  ctx.fillStyle = 'rgba(30,12,16,.75)';
+  for (let i = 0; i < 7; i++) { const x = 70 + i * 140 + (i % 2) * 30, y0 = ((i * 173 - par) % 700 + 700) % 700 - 300; ctx.fillRect(x, y0, 26 + (i % 3) * 8, 640); }
+  ctx.strokeStyle = 'rgba(15,6,9,.8)'; ctx.lineWidth = 2;
+  for (let i = 0; i < 9; i++) { const x = 30 + i * 112; ctx.beginPath(); for (let y = -20; y < H + 20; y += 10) { const yy = y + ((-par * 1.2) % 10); ctx.lineTo(x + S(yy * .02 + i) * 2, yy); } ctx.stroke(); }
+  ctx.translate(W / 2, H / 2); ctx.scale(ZM, ZM); ctx.translate(-st.cam.x, -st.cam.y);
+  for (const [bx, by] of DA.braz) {
+    const fl = .8 + S(st.time * 13 + bx) * .1 + S(st.time * 7.3 + by) * .1;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; const g = ctx.createRadialGradient(bx, by, 0, bx, by, 220 * fl);
+    g.addColorStop(0, 'rgba(255,140,70,.42)'); g.addColorStop(1, 'rgba(255,140,70,0)'); ctx.fillStyle = g; ctx.fillRect(bx - 230, by - 230, 460, 460); ctx.restore();
+  }
+  { const img = renderWorld(DA), vw = W / ZM + 40, vh = H / ZM + 40, sx = clamp(st.cam.x - vw / 2, 0, DA.w - vw), sy = clamp(st.cam.y - vh / 2, 0, DA.h - vh);
+    ctx.drawImage(img, sx, sy, vw, vh, sx, sy, vw, vh); }
+  for (const [bx, by, sd] of DA.braz) {
+    ctx.save(); ctx.fillStyle = '#ffb070'; ctx.shadowColor = '#ff7a3c'; ctx.shadowBlur = 18;
+    ctx.beginPath(); ctx.ellipse(bx + sd * 9, by - 6, 5, 9 + S(st.time * 14 + by) * 2, 0, 0, TAU); ctx.fill(); ctx.restore();
+    if (Math.random() < .08) emit(st.P, { x: bx + sd * 9, y: by - 12, vx: rnd(-10, 10), vy: rnd(-70, -30), r: rnd(.8, 1.6), col: '#ff9a5c', glow: 6, life: rnd(.6, 1.2), a: .9 }); }
+  if (DA.bell) { const [x, y] = DA.bell; ctx.save(); ctx.globalCompositeOperation = 'lighter'; const g = ctx.createRadialGradient(x, y + 80, 0, x, y + 80, 160); g.addColorStop(0, 'rgba(229,56,59,.18)'); g.addColorStop(1, 'rgba(229,56,59,0)'); ctx.fillStyle = g; ctx.fillRect(x - 160, y - 80, 320, 320); ctx.restore(); }
+  // portals pulse harder as depth rises
+  const dHeat = Math.min(1, (st.depth - 1) / 8);
+  DA.portals.forEach(([x, y], i) => {
+    const fx = st.pfx[i] || 0, pul = 1 + S(st.time * (3 + dHeat * 4) + i) * (.05 + dHeat * .05) + fx * .5 + dHeat * .25;
+    ctx.save(); ctx.translate(x, y); ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 60 * pul); g.addColorStop(0, `rgba(229,56,59,${.35 + fx + dHeat * .2})`); g.addColorStop(1, 'rgba(229,56,59,0)'); ctx.fillStyle = g; ctx.fillRect(-90, -90, 180, 180);
+    ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#050304'; ctx.beginPath(); ctx.ellipse(0, 0, 16 * pul, 26 * pul, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = C.crimson; ctx.shadowColor = C.crimson; ctx.shadowBlur = 12; ctx.lineWidth = 2;
+    for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.ellipse(0, 0, (18 + k * 6) * pul, (28 + k * 7) * pul, 0, st.time * (2 + k) + k, st.time * (2 + k) + k + 2.2); ctx.stroke(); }
+    ctx.restore();
+  });
+  // ember trail
+  if (st.fire.length) { ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    for (const fl of st.fire) { const a = 1 - fl.t / 1.4, h = (16 + S(st.time * 20 + fl.x) * 5) * a; const g = ctx.createRadialGradient(fl.x, fl.y - h * .5, 0, fl.x, fl.y - h * .5, 26);
+      g.addColorStop(0, `rgba(255,170,90,${.55 * a})`); g.addColorStop(1, 'rgba(255,90,40,0)'); ctx.fillStyle = g; ctx.fillRect(fl.x - 26, fl.y - h * .5 - 26, 52, 52);
+      ctx.fillStyle = `rgba(255,200,120,${.7 * a})`; ctx.beginPath(); ctx.ellipse(fl.x, fl.y - h * .4, 5 * a + 2, h * .5 + 2, 0, 0, TAU); ctx.fill(); }
+    ctx.restore(); }
+  // boss quakes
+  for (const q of st.quakes) { const qx = q.x + q.dir * q.t * 560, a = 1 - q.t / 1.1;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgba(229,56,59,${.7 * a})`; ctx.shadowColor = C.crimson; ctx.shadowBlur = 16;
+    ctx.beginPath(); ctx.moveTo(qx - 14, q.y); ctx.lineTo(qx - 4 * q.dir, q.y - 34 * a); ctx.lineTo(qx + 14, q.y); ctx.fill(); ctx.restore(); }
+  // shards
+  for (const g of st.G) { ctx.save(); ctx.translate(g.x, g.y); ctx.fillStyle = C.cyan; ctx.shadowColor = C.cyan; ctx.shadowBlur = 10;
+    ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(4.5, 0); ctx.lineTo(0, 7); ctx.lineTo(-4.5, 0); ctx.fill(); ctx.restore(); }
+  // enemies
+  for (const e of st.E) {
+    const flash = e.hit > 0 ? { body: '#ffe6d6', back: '#ffe6d6', rim: false } : {};
+    const tt = e.ground ? st.time : 0;
+    if (e.type === 'boss') {
+      const wind = e.ai === 'wind' ? 1 - e.at / .75 : 0;
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'; const g = ctx.createRadialGradient(e.x, e.y - 60, 0, e.x, e.y - 60, 130 + wind * 60);
+      g.addColorStop(0, `rgba(229,56,59,${.28 + wind * .4})`); g.addColorStop(1, 'rgba(229,56,59,0)'); ctx.fillStyle = g; ctx.fillRect(e.x - 200, e.y - 260, 400, 400); ctx.restore();
+      drawBrute(ctx, e.x, e.y - wind * 10, 1.2, e.ground && e.ai === 'walk' ? st.time * .8 : 0, e.f, Object.assign({ third: 1, glow: 14 + wind * 24, off: 0 }, e.king ? { headExtra: crownHead } : {}, flash));
+      continue;
+    }
+    if (e.elite) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.strokeStyle = `rgba(242,180,58,${.55 + S(st.time * 6 + e.o) * .2})`; ctx.shadowColor = C.gold; ctx.shadowBlur = 14; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(e.x, e.y - 2, 22, 6, 0, 0, TAU); ctx.stroke(); ctx.restore(); }
+    const look = Object.assign({ off: e.o, glow: e.elite ? 14 : 9 }, e.elite ? { eyes: C.gold } : {}, flash);
+    if (e.type === 'bat') drawBat(ctx, e.x, e.y, .6 * e.sc, st.time, e.f, { off: e.o, body: e.hit > 0 ? '#ffe6d6' : C.shade });
+    else if (e.type === 'sh') drawShambler(ctx, e.x, e.y, .62 * e.sc, tt, e.f, look);
+    else if (e.type === 'br') drawBrute(ctx, e.x, e.y, .7 * e.sc, tt, e.f, look);
+    else drawHexer(ctx, e.x, e.y, .7 * e.sc, st.time + e.o, e.f, look);
+    if (e.elite) { ctx.font = `600 9px ${MONO}`; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#000'; ctx.strokeText(e.elite, e.x, e.y - e.h - 16); ctx.fillStyle = C.gold; ctx.fillText(e.elite, e.x, e.y - e.h - 16);
+      ctx.fillStyle = 'rgba(0,0,0,.8)'; ctx.fillRect(e.x - 17, e.y - e.h - 11, 34, 5); ctx.fillStyle = C.gold; ctx.fillRect(e.x - 16, e.y - e.h - 10, 32 * clamp(e.hp / e.mhp, 0, 1), 3); }
+  }
+  for (const q of st.proj) { ctx.save(); ctx.fillStyle = C.violet; ctx.shadowColor = C.violet; ctx.shadowBlur = 16; circ(ctx, q.x, q.y, 6); ctx.restore(); }
+  // echo shades
+  for (const s of st.shades) { const k = s.t / .5, sw = lerp(-2.5, 1.4, easeOut(clamp(k * 3, 0, 1)));
+    const J = rig({ x: s.x, y: s.y - 44, f: s.f, s: PS, lean: .3, tilt: -.1, legs: [[-.45, -1.1], [.85, -1.5]], arms: [[-.6, 1.2], [sw, .15]] });
+    ctx.save(); ctx.globalAlpha = (1 - k) * .8; paint(ctx, J, { body: '#2a0f3d', back: '#1a0a26', rim: 'rgba(180,77,255,.8)', eyes: C.violet, glow: 10 }); ctx.restore();
+    smear(ctx, J.sh[0], J.sh[1], 70, armCan(-2.35, s.f), armCan(sw + .15, s.f), .7, (1 - k) * .8, C.violet); }
+  // storm crescents
+  for (const c of st.cres) { const a = 1 - c.t / .5; ctx.save(); ctx.translate(c.x, c.y); ctx.scale(c.f, 1); ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = `rgba(63,214,196,${a})`; ctx.shadowColor = C.cyan; ctx.shadowBlur = 18; ctx.lineCap = 'round';
+    for (let k = 0; k < 3; k++) { ctx.lineWidth = 7 - k * 2; ctx.beginPath(); ctx.arc(-k * 10, 0, 26 - k * 3, -1.15, 1.15); ctx.stroke(); } ctx.restore(); }
+  // player
+  {
+    const x = p.x, y = p.y, f = p.f;
+    let pose, hip = y - 42, rot = 0, bladeAng = null, sm = null;
+    const fast = p.dash > 0 || p.slam || p.flip > 0 || p.kick > 0 || Math.abs(p.vy) > 700;
+    if (st.dying) { pose = { lean: .5, tilt: .4, legs: [[-.15, -1.55], [.95, -1.45]], arms: [[.2, .3], [.5, .2]] }; hip = y - 25; bladeAng = f > 0 ? .15 : PI - .15; }
+    else if (p.dash > 0) { pose = { lean: .78, tilt: -.25, legs: [[-.95, -1.25], [.55, -1.75]], arms: [[-1.95, .35], [-1.6, .25]] }; hip = y - 48; bladeAng = f > 0 ? PI - .15 : .15; }
+    else if (p.slam) { pose = { lean: 0, tilt: -.1, legs: [[.3, -1.6], [.7, -1.8]], arms: [[-1.3, .5], [.05, 0]] }; hip = y - 34; bladeAng = PI / 2; }
+    else if (p.atk) {
+      const stepT = STEP[st.weapon], k = easeOut(clamp(p.atk.t / (stepT * .75), 0, 1)), sw = [[-2.5, 1.8], [1.6, -1.2], [1.2, -2.7]][p.atk.step];
+      const a = lerp(sw[0], sw[1], k);
+      pose = { lean: p.atk.step === 2 ? -.05 : .3, tilt: -.1, legs: p.ground ? [[-.62, -.05], [.72, -.62]] : [[-.45, -1.1], [.85, -1.5]], arms: [[-.8 + .2 * p.atk.step, 1.2], [a, .15]] };
+      hip = p.ground ? y - 37 : y - 44;
+      sm = { a0: armCan(sw[0] + .15, f), a1: armCan(a + .15, f), al: 1 - clamp(p.atk.t / stepT, 0, 1) * .6 };
+    } else if (!p.ground) {
+      if (p.wall && p.slideT > 0) { pose = { lean: .02, tilt: -.1, legs: [[-.55, -.95], [.3, -1.25]], arms: [[-1.55, .25], [.6, 1.1]] }; }
+      else if (p.flip > 0) {
+        // double jump: tuck, stamp the back leg down on the burst of air, then switch legs as the arms sweep up
+        const K = [
+          { t: 0, lean: .3, tilt: -.05, legs: [[.95, -1.9], [1.25, -2.05]], arms: [[-1.2, .9], [-.8, 1.1]] },
+          { t: .3, lean: -.12, tilt: -.15, legs: [[-.35, -.05], [1.45, -1.7]], arms: [[2.3, .35], [2.7, .25]] },
+          { t: .65, lean: .05, tilt: -.1, legs: [[1.2, -1.6], [-.25, -.35]], arms: [[1.6, .7], [2.2, .5]] },
+          { t: 1, lean: .22, tilt: -.08, legs: [[.35, -1.55], [1.0, -1.8]], arms: [[-1.1, 1.0], [1.5, .8]] }];
+        const u = 1 - p.flip / .4; let i = 0; while (i < K.length - 2 && u > K[i + 1].t) i++;
+        const a = K[i], b = K[i + 1], m = ease(clamp((u - a.t) / (b.t - a.t), 0, 1));
+        pose = { lean: lerp(a.lean, b.lean, m), tilt: lerp(a.tilt, b.tilt, m), legs: lerpPose(a.legs, b.legs, m), arms: lerpPose(a.arms, b.arms, m) };
+      }
+      else if (p.kick > 0) { const m = 1 - p.kick / .22; pose = { lean: .3, tilt: -.1, legs: lerpPose([[-.95, -.15], [.15, -.35]], [[-.55, -1.25], [.95, -1.35]], m), arms: lerpPose([[1.7, .5], [2.5, .2]], [[-1.9, .5], [2.0, .5]], m) }; }
+      else {
+        // one continuous arc: take-off stretch, rising tuck, apex, then legs reach down for the landing
+        const RISE = { lean: .18, tilt: -.12, legs: [[-.5, -1.05], [.95, -1.55]], arms: [[-1.5, .9], [2.1, .5]] };
+        const APEX = { lean: .3, tilt: -.05, legs: [[.3, -1.65], [1.0, -1.85]], arms: [[-1.1, 1.0], [1.5, .8]] };
+        const FALL = { lean: .1, tilt: .02, legs: [[-.3, -.45], [.45, -.8]], arms: [[-2.1, .5], [1.9, .45]] };
+        const k = clamp((p.vy + 650) / 1300, 0, 1), A2 = k < .5 ? RISE : APEX, B2 = k < .5 ? APEX : FALL, u = ease(k < .5 ? k * 2 : k * 2 - 1);
+        pose = { lean: lerp(A2.lean, B2.lean, u) + clamp(p.vx / 310, -1, 1) * f * .12, tilt: lerp(A2.tilt, B2.tilt, u), legs: lerpPose(A2.legs, B2.legs, u), arms: lerpPose(A2.arms, B2.arms, u) };
+        if (p.stretch > 0) { const m = ease(p.stretch / .16); pose.legs = lerpPose(pose.legs, [[-.18, -.08], [.22, -.14]], m); pose.arms = lerpPose(pose.arms, [[-2.5, .2], [2.6, .25]], m); pose.lean = lerp(pose.lean, .05, m); }
+      }
+      hip = y - 46;
+    } else if (Math.abs(p.vx) < 30) { const b = S(st.time * 2.2); pose = { lean: .06, tilt: -.05, legs: [[-.24, .1], [.28, -.18]], arms: [[-.2, .34], [.42 + b * .04, .7]] }; hip = y - 42; }
+    else { const rp = runPose(p.ph); pose = { lean: .32, tilt: -.12, legs: rp.legs, arms: [rp.arms[0], [rp.arms[1][0] * .6 + .2, 1.2]] }; hip = y - 42 + Co(p.ph * 2) * 1.5; }
+    // crouch before take-off and squash on landing, blended over whatever the body was doing
+    const cw = p.ground && !p.atk && !st.dying && !p.dash ? Math.max(p.pre > 0 ? 1 : 0, clamp(p.land / .12, 0, 1)) : 0;
+    if (cw > 0) { pose = Object.assign({}, pose, { lean: lerp(pose.lean, .42, cw), tilt: lerp(pose.tilt || 0, -.05, cw), legs: lerpPose(pose.legs, [[.8, -1.5], [1.0, -1.65]], cw), arms: lerpPose(pose.arms, [[-.55, .9], [.75, 1.1]], cw) }); hip = lerp(hip, y - 28, cw); }
+    // every joint follows its target on a damped spring, so moves travel through real in-betweens and overshoot slightly
+    {
+      const tg = [pose.lean, pose.tilt || 0, hip - y, ...pose.legs.flat(), ...pose.arms.flat()];
+      if (!st.ps) st.ps = { v: tg.slice(), d: tg.map(() => 0) };
+      const quick = p.atk || p.dash > 0 || p.slam, kk = quick ? 1100 : 300, zz = quick ? 50 : 21, n = Math.ceil(vdt / .008), h = n ? vdt / n : 0;
+      for (let s2 = 0; s2 < n; s2++) for (let i = 0; i < tg.length; i++) { st.ps.d[i] += ((tg[i] - st.ps.v[i]) * kk - st.ps.d[i] * zz) * h; st.ps.v[i] += st.ps.d[i] * h; }
+      const v = st.ps.v; pose = Object.assign({}, pose, { lean: v[0], tilt: v[1], legs: [[v[3], v[4]], [v[5], v[6]]], arms: [[v[7], v[8]], [v[9], v[10]]] }); hip = y + v[2];
+    }
+    const J = rig(Object.assign({ x, y: hip, f, s: PS }, pose));
+    const cx = x, cy = hip - 12, cs = Co(rot), sn = S(rot), M = (px, py) => [cx + (px - cx) * cs - (py - cy) * sn, cy + (px - cx) * sn + (py - cy) * cs];
+    if (!rot) ghosts(ctx, st.gh, (fast || Math.abs(p.vx) > 280) && !st.dying ? J : null, vdt, { every: .03, life: .2, alpha: .3 }); else ghosts(ctx, st.gh, null, vdt);
+    const blink = p.hurt > 0 && Math.floor(p.hurt * 20) % 2;
+    ctx.globalAlpha = st.dying ? clamp(st.dying / 1.8, 0, 1) : blink ? .45 : 1;
+    if (rot) rotAbout(ctx, cx, cy, rot, () => drawPlayer(ctx, J, st.time * 1.6, 1.3, .1)); else drawPlayer(ctx, J, st.time * 1.6, p.wall && p.slideT ? .5 : 1.3, p.wall && p.slideT ? -.6 : .1);
+    const [hx, hy] = M(J.armF.ex, J.armF.ey);
+    const ba = (bladeAng ?? (p.atk ? J.armF.can : (f > 0 ? 2.5 : .64) + (p.ground ? 0 : -f * .5))) + rot;
+    const sc = { katana: .62, spear: .55, greatsword: .52, daggers: .8, sickle: .7 }[st.weapon];
+    if (st.weapon === 'daggers') blade(ctx, J.armB.ex, J.armB.ey, J.armB.can, 'daggers', sc, .4);
+    const w = blade(ctx, hx, hy, ba, st.weapon, sc, p.atk || p.slam ? 1.3 : .5 + st.temper * .4);
+    ctx.globalAlpha = 1;
+    ribbon(ctx, st.tr, rot ? null : w, vdt, '255,176,96', .17);
+    if (sm) smear(ctx, J.sh[0], J.sh[1], REACH[st.weapon] * .62, sm.a0, sm.a1, .7, sm.al * .7);
+    if (has(st, 'IRON VEIL') && st.veilT <= 0 && !st.dying) { ctx.save(); ctx.strokeStyle = 'rgba(63,214,196,.35)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.ellipse(x, y - 30, 24, 36, 0, 0, TAU); ctx.stroke(); ctx.restore(); }
+  }
+  // rings
+  st.rings = st.rings.filter(w => (w.t += rdt) < .5);
+  for (const w of st.rings) { const k = w.t / .5; ctx.save(); ctx.translate(w.x, w.y);
+    if (w.kind === 'gale') { ctx.scale(.3, 1); ctx.strokeStyle = C.cyan; ctx.shadowColor = C.cyan; ctx.shadowBlur = 16; ctx.globalAlpha = 1 - k; ctx.lineWidth = 10 * (1 - k) + 2; ctx.beginPath(); ctx.arc(0, 0, 20 + easeOut(k) * 170, 0, TAU); ctx.stroke(); }
+    else if (w.kind === 'wing') { ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round'; const e = easeOut(k);
+      for (const sd of [-1, 1]) for (let j = 0; j < 3; j++) { ctx.strokeStyle = `rgba(229,56,59,${(1 - k) * (.9 - j * .25)})`; ctx.shadowColor = C.crimson; ctx.shadowBlur = 12; ctx.lineWidth = (5 - j * 1.4) * (1 - k) + 1;
+        ctx.beginPath(); ctx.moveTo(sd * 6, 0); ctx.quadraticCurveTo(sd * (24 + e * 50 - j * 8), -6 - j * 6, sd * (40 + e * 70 - j * 10), 14 + e * 26 + j * 4); ctx.stroke(); } }
+    else if (w.kind === 'veil') { ctx.strokeStyle = C.cyan; ctx.shadowColor = C.cyan; ctx.shadowBlur = 14; ctx.globalAlpha = 1 - k; ctx.lineWidth = 4 * (1 - k) + 1; ctx.beginPath(); ctx.arc(0, 0, 20 + easeOut(k) * 40, 0, TAU); ctx.stroke(); }
+    else if (w.kind === 'ember') { ctx.globalCompositeOperation = 'lighter'; const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 30 + k * 60); g.addColorStop(0, `rgba(255,170,90,${.7 * (1 - k)})`); g.addColorStop(1, 'rgba(255,90,40,0)'); ctx.fillStyle = g; ctx.fillRect(-100, -100, 200, 200); }
+    else if (w.kind === 'slam') { const c = w.red ? C.crimson : w.heavy ? C.violet : C.gold; ctx.scale(1, .22); ctx.strokeStyle = c; ctx.shadowColor = c; ctx.shadowBlur = 18; ctx.globalAlpha = 1 - k; ctx.lineWidth = 12 * (1 - k) + 2; ctx.beginPath(); ctx.arc(0, 0, 20 + easeOut(k) * (w.big ? 300 : w.heavy ? 250 : 160), 0, TAU); ctx.stroke(); }
+    else { ctx.scale(1, .22); ctx.strokeStyle = C.crimson; ctx.shadowColor = C.crimson; ctx.shadowBlur = 10; ctx.globalAlpha = .8 * (1 - k); ctx.lineWidth = 5 * (1 - k) + 1; ctx.beginPath(); ctx.arc(0, 0, 10 + easeOut(k) * 50, 0, TAU); ctx.stroke(); }
+    ctx.restore(); }
+  stepParts(ctx, st.P, dt);
+  ctx.textAlign = 'center'; ctx.lineJoin = 'round';
+  st.N = st.N.filter(n => (n.life -= dt) > 0);
+  for (const n of st.N) { const k = 1 - n.life / .7, word = typeof n.v === 'string'; ctx.font = `700 ${word ? 15 : n.crit ? 21 : 15}px ${MONO}`; ctx.globalAlpha = Math.min(1, n.life * 3);
+    const yy = n.y - k * 24; ctx.lineWidth = 4; ctx.strokeStyle = '#000'; ctx.strokeText(n.v, n.x, yy); ctx.fillStyle = n.col || (n.crit ? C.gold : '#fff1e4'); ctx.fillText(n.v, n.x, yy); }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+  ctx.drawImage(st.vig, 0, 0, W, H);
+  if (p.hurt > .8 && !st.ov) { ctx.fillStyle = `rgba(229,56,59,${(p.hurt - .8) * .8})`; ctx.fillRect(0, 0, W, H); }
+  if (st.dying) { ctx.fillStyle = `rgba(0,0,0,${(1 - st.dying / 1.8) * .5})`; ctx.fillRect(0, 0, W, H); }
+
+  // darkness closes in as candles go out: the light around the player shrinks with each depth
+  {
+    const out = (st.depth - 1) % 15 + Math.floor((st.depth - 1) / 15) * 3, k = clamp(out / 11, 0, 1);
+    if (k > 0) {
+      const sx = (p.x - st.cam.x) * ZM + W / 2, sy = (p.y - 30 - st.cam.y) * ZM + H / 2, r0 = lerp(460, 140, k);
+      const g = ctx.createRadialGradient(sx, sy, r0 * .35, sx, sy, r0 * 1.6);
+      g.addColorStop(0, 'rgba(4,2,3,0)'); g.addColorStop(1, `rgba(4,2,3,${lerp(.4, .88, k)})`);
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    }
+  }
+  /* ---- HUD ---- */
+  const txt = (s2, x, y, font, col, align = 'left', lw = 4) => { ctx.font = font; ctx.textAlign = align; ctx.lineWidth = lw; ctx.strokeStyle = '#000'; ctx.strokeText(s2, x, y); ctx.fillStyle = col; ctx.fillText(s2, x, y); };
+  for (let i = 0; i < st.maxHp; i++) heart(ctx, 26 + i * 26, 30, 1, i < st.hp);
+  if (st.maxHp < 5) txt('CURSED', 26 + st.maxHp * 26 - 4, 36, `600 10px ${MONO}`, C.crimson, 'left', 3);
+  diamond(ctx, 24, 62, 7, C.cyan, null, 8);
+  txt(String(st.runWax), 36, 67, `600 14px ${MONO}`, '#f3ebe0');
+  txt('RUN WAX', 36 + ctx.measureText(String(st.runWax)).width + 8, 67, `600 10px ${MONO}`, '#9a9289', 'left', 3);
+  hearse(ctx, 24, 132, st.depth, st.hidden, st.time);
+  txt(`RUN #${st.run} · SEED ${seedHex(st.seed)} · HANGING SPIRE`, W / 2, 20, `600 11px ${MONO}`, '#9a9289', 'center', 3);
+  txt(`DEPTH ${roman(st.depth)}`, W / 2, 54, `900 32px ${DISP}`, st.depth >= 7 ? C.crimson : '#f3ebe0', 'center', 6);
+  if (st.boss) {
+    const bw = 380, x0 = (W - bw) / 2, by = 70;
+    txt(st.bossName, x0, by - 3, `600 11px ${MONO}`, C.crimson, 'left', 3); txt('BOSS', x0 + bw, by - 3, `600 11px ${MONO}`, '#9a9289', 'right', 3);
+    ctx.fillStyle = 'rgba(0,0,0,.9)'; ctx.fillRect(x0 - 2, by + 2, bw + 4, 13); ctx.fillStyle = '#4a1014'; ctx.fillRect(x0, by + 4, bw, 9);
+    ctx.save(); ctx.fillStyle = C.crimson; ctx.shadowColor = C.crimson; ctx.shadowBlur = 10; ctx.fillRect(x0, by + 4, bw * clamp(st.boss.hp / st.boss.mhp, 0, 1), 9); ctx.restore();
+  } else {
+    const bw = 220, x0 = (W - bw) / 2, by = 66, k = st.bossIntro > 0 ? 1 : st.dp / DEPTH_T;
+    ctx.fillStyle = 'rgba(0,0,0,.85)'; ctx.fillRect(x0 - 2, by - 2, bw + 4, 9);
+    ctx.save(); const g = ctx.createLinearGradient(x0, 0, x0 + bw, 0); g.addColorStop(0, '#7a1c1f'); g.addColorStop(1, C.crimson); ctx.fillStyle = g; ctx.shadowColor = C.crimson; ctx.shadowBlur = 8;
+    ctx.globalAlpha = st.bossIntro > 0 ? .6 + S(st.time * 20) * .4 : 1; ctx.fillRect(x0, by, bw * k, 5); ctx.restore();
+    txt(`${fmtT(st.rt)} · BOSS AT DEPTH ${roman(st.nextBoss)}`, W / 2, by + 22, `600 11px ${MONO}`, '#f3ebe0', 'center', 3);
+  }
+  const fv = clamp(st.flow / 20, 0, 1), mul = (1 + Math.floor(st.flow / 5) * .5).toFixed(1), fx = W - 210;
+  txt('FLOW', fx, 24, `600 12px ${MONO}`, '#f3ebe0');
+  txt('×' + mul, W - 16, 30, `900 26px ${DISP}`, fv > .5 ? C.gold : '#f3ebe0', 'right', 5);
+  ctx.fillStyle = 'rgba(0,0,0,.8)'; ctx.fillRect(fx - 2, 36, 196, 12); ctx.save(); ctx.fillStyle = C.gold; ctx.shadowColor = C.gold; ctx.shadowBlur = fv > .5 ? 12 : 0; ctx.fillRect(fx, 38, 192 * fv, 8); ctx.restore();
+  const mmH = 180, mmW = mmH * DA.w / DA.h, mx = W - mmW - 14, my = 62;
+  ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(mx - 3, my - 3, mmW + 6, mmH + 6);
+  drawArenaMap(ctx, DA, mx, my, mmW, mmH, { view: [st.cam.x - W / 2 / ZM, st.cam.y - H / 2 / ZM, W / ZM, H / ZM], dots: st.E.map(e => ({ x: e.x, y: e.y - 20, r: e.type === 'boss' ? 5 : e.elite ? 3 : 2.2, c: e.elite ? C.gold : e.type === 'sp' ? C.violet : C.crimson })).concat([{ x: p.x, y: p.y - 24, r: 3.4, c: C.gold }]) });
+  // weapon, runes, sigils
+  const bx0 = 18, by0 = H - 66;
+  ctx.fillStyle = 'rgba(0,0,0,.75)'; ctx.fillRect(bx0, by0, 120, 46); ctx.strokeStyle = C.gold; ctx.lineWidth = 1.5; ctx.strokeRect(bx0 + .5, by0 + .5, 119, 45);
+  blade(ctx, bx0 + 22, by0 + 26, -.2, st.weapon, 72 / (WLEN[st.weapon] + 30), .3);
+  txt(st.weapon.toUpperCase() + (st.temper ? ' +' + st.temper : ''), bx0 + 60, by0 + 42, `600 10px ${MONO}`, C.gold, 'center', 3);
+  st.runes.forEach((rn, i) => { const d = RUNE_DEFS[rn], x = bx0 + 144 + i * 28, y = by0 + 18, c = d.rar === 'cursed' ? C.crimson : SIGCOL[d.sig];
+    diamond(ctx, x, y, 12, d.rar === 'cursed' ? '#3a0d12' : '#0d0b10', c, 6); txt(rn[0], x, y + 4, `600 10px ${MONO}`, '#f3ebe0', 'center', 3); });
+  let sx = bx0 + 132;
+  for (const s of ['GALE', 'EMBER', 'ECHO', 'EDGE']) { const n = sigCount(st, s); if (!n) continue; const lab = `${s} ${Math.min(n, 3)}/3`; txt(lab, sx, by0 + 44, `600 10px ${MONO}`, SIGCOL[s], 'left', 3); sx += ctx.measureText(lab).width + 12; }
+  if (!st.runes.length) txt('NO RUNES YET · LEVEL UP TO DRAFT', bx0 + 132, by0 + 44, `600 10px ${MONO}`, '#9a9289', 'left', 3);
+  [['DASH', 'SHIFT', Math.max(0, p.dashCd) / .6], ['SLAM', 'S+J', 0], ['WALL', 'SPACE', 0]].forEach(([n, k, cd], i) => {
+    const x = W - 214 + i * 66, y = H - 66; ctx.fillStyle = 'rgba(0,0,0,.75)'; ctx.fillRect(x, y, 58, 46); ctx.strokeStyle = 'rgba(255,128,88,.7)'; ctx.lineWidth = 1.5; ctx.strokeRect(x + .5, y + .5, 57, 45);
+    if (cd > 0) { ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(x + 1, y + 1, 56, 44 * Math.min(1, cd)); }
+    txt(n, x + 29, y + 20, `600 11px ${MONO}`, '#f3ebe0', 'center', 3); txt(k, x + 29, y + 37, `600 11px ${MONO}`, '#9a9289', 'center', 3);
+  });
+  // XP bar
+  const need = 8 + st.lvl * 5, xb = 64, xw = W - xb - 18;
+  txt(`LV ${st.lvl}`, 18, H - 5, `600 10px ${MONO}`, C.cyan, 'left', 3);
+  ctx.fillStyle = 'rgba(0,0,0,.85)'; ctx.fillRect(xb - 1, H - 13, xw + 2, 7); ctx.save(); ctx.fillStyle = C.cyan; ctx.shadowColor = C.cyan; ctx.shadowBlur = 8; ctx.fillRect(xb, H - 12, xw * clamp(st.xp / need, 0, 1), 5); ctx.restore();
+  if (st.banner && !st.ov) { const b = st.banner, a = Math.min(1, b.t * 3, (1.2 - Math.min(1.2, b.t)) * 6 + .3), col = b.col || '#f3ebe0';
+    ctx.save(); ctx.globalAlpha = clamp(a, 0, 1);
+    const gy = H * .38; const gb = ctx.createLinearGradient(0, 0, W, 0); gb.addColorStop(0, 'rgba(0,0,0,0)'); gb.addColorStop(.5, 'rgba(0,0,0,.7)'); gb.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gb; ctx.fillRect(0, gy - 44, W, 76);
+    ctx.shadowColor = b.col || C.crimson; ctx.shadowBlur = 18;
+    txt(b.text, W / 2, gy, `900 44px ${DISP}`, col, 'center', 6);
+    ctx.shadowBlur = 0; txt(b.sub, W / 2, gy + 24, `600 13px ${MONO}`, b.col === C.crimson ? '#f3ebe0' : C.cyan, 'center', 3); ctx.restore(); }
+  if (st.ov) (st.ov.kind === 'over' ? drawSummary : drawChoice)(ctx, st, W, H, txt);
+}
+
+function drawChoice(ctx, st, W, H, txt) {
+  const o = st.ov, n = o.opts.length, t = o.t;
+  const fade = clamp(t * 5, 0, 1) * clamp((o.dur - t) * 4, 0, 1), decided = t >= o.at, live_ = !decided;
+  ctx.save(); ctx.globalAlpha = fade * .9; ctx.fillStyle = '#050304'; ctx.fillRect(0, 0, W, H); ctx.restore();
+  ctx.save(); ctx.globalAlpha = fade;
+  const head = o.kind === 'weapon' ? ['CHOOSE YOUR WEAPON', `RUN #${st.run} · SEED ${seedHex(st.seed)} · A NEW DRAW EVERY RUN`]
+    : o.kind === 'draft' ? [`LEVEL ${o.lvl} · DRAFT A RUNE`, `DEPTH ${roman(st.depth)} · ${fmtT(st.rt)} · RUNES CHANGE HOW YOUR MOVES WORK`]
+    : ['SHADE MERCHANT', `YOU HAVE ${st.runWax} RUN WAX · SPEND IT OR LOSE 60% OF IT ON DEATH`];
+  ctx.shadowColor = C.crimson; ctx.shadowBlur = 20; txt(head[0], W / 2, 92, `900 40px ${DISP}`, '#f3ebe0', 'center', 6); ctx.shadowBlur = 0;
+  txt(head[1], W / 2, 118, `600 12px ${MONO}`, '#9a9289', 'center', 3);
+  const cw = n === 2 ? 230 : 214, ch = 290, gap = 26, x0 = (W - n * cw - (n - 1) * gap) / 2, y0 = 150;
+  const hov = decided ? o.pick : Math.max(0, o.pick);
+  for (let i = 0; i < n; i++) {
+    const v = o.opts[i], sel = i === hov && o.pick >= 0, chosen = decided && i === o.pick, slide = easeOut(clamp(t * 4 - i * .3, 0, 1));
+    const x = x0 + i * (cw + gap), y = y0 + (1 - slide) * 50 - (sel ? 12 : 0) - (chosen ? easeOut(clamp((t - o.at) * 4, 0, 1)) * 6 : 0), cx = x + cw / 2;
+    let col = C.gold, label = '', name = '', desc = '';
+    if (o.kind === 'weapon') { label = 'WEAPON'; name = v.toUpperCase(); desc = WDESC[v]; if (v === 'sickle') { label = 'NEW · UNLOCKED'; col = C.cyan; } }
+    else if (o.kind === 'draft') { const d = RUNE_DEFS[v]; col = RARCOL[d.rar]; label = `${d.rar.toUpperCase()} · ${d.sig} SIGIL`; name = v; desc = d.d; }
+    else { col = st.runWax >= v[2] ? C.gold : '#5a534d'; label = `◆ ${v[2]} WAX`; name = v[0]; desc = v[1]; }
+    ctx.save(); ctx.globalAlpha = fade * slide * (decided && !chosen ? .3 : 1);
+    rrect(ctx, x, y, cw, ch, 10);
+    const g = ctx.createLinearGradient(0, y, 0, y + ch); g.addColorStop(0, '#17111a'); g.addColorStop(1, '#0a080c'); ctx.fillStyle = g;
+    if (sel) { ctx.shadowColor = col; ctx.shadowBlur = chosen ? 34 : 20; } ctx.fill(); ctx.shadowBlur = 0;
+    ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.5 : 1.2; ctx.stroke();
+    txt(label, cx, y + 26, `600 11px ${MONO}`, col, 'center', 3);
+    // icon
+    const iy = y + 92;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; const rg = ctx.createRadialGradient(cx, iy, 0, cx, iy, 70); rg.addColorStop(0, o.kind === 'draft' && RUNE_DEFS[v].rar === 'cursed' ? 'rgba(229,56,59,.28)' : 'rgba(255,140,70,.18)'); rg.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = rg; ctx.fillRect(cx - 70, iy - 70, 140, 140); ctx.restore();
+    if (o.kind === 'weapon') blade(ctx, cx - 54, iy + 30, -.62, v, 120 / (WLEN[v] + 20), sel ? 1.2 : .5);
+    else if (o.kind === 'draft') { const d = RUNE_DEFS[v], sc = d.rar === 'cursed' ? C.crimson : SIGCOL[d.sig]; diamond(ctx, cx, iy, 34, d.rar === 'cursed' ? '#3a0d12' : '#0d0b10', sc, sel ? 22 : 10); txt(d.sig[0], cx, iy + 11, `900 32px ${DISP}`, '#f3ebe0', 'center', 4); }
+    else if (v[0] === 'MEND') { heart(ctx, cx - 16, iy + 2, 1.7, true); heart(ctx, cx + 16, iy + 2, 1.7, true); }
+    else if (v[0] === 'TEMPER') blade(ctx, cx - 50, iy + 28, -.62, st.weapon, 110 / (WLEN[st.weapon] + 20), 1.4);
+    else if (v[0] === 'PURGE') { diamond(ctx, cx, iy, 30, '#3a0d12', C.crimson, 12); ctx.strokeStyle = '#f3ebe0'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(cx - 16, iy - 16); ctx.lineTo(cx + 16, iy + 16); ctx.moveTo(cx + 16, iy - 16); ctx.lineTo(cx - 16, iy + 16); ctx.stroke(); }
+    else for (let k = -1; k <= 1; k++) diamond(ctx, cx + k * 28, iy, 16, '#0d0b10', C.cyan, 8);
+    txt(name, cx, y + 170, `900 ${name.length > 11 ? 24 : 28}px ${DISP}`, '#f3ebe0', 'center', 5);
+    ctx.font = `500 14px ${BODY}`; ctx.fillStyle = '#c9bfb4'; ctx.textAlign = 'center'; wrapText(ctx, desc, cx, y + 196, cw - 34, 19);
+    if (o.kind === 'draft') { const d = RUNE_DEFS[v], c = sigCount(st, d.sig) + 1;
+      for (let k = 0; k < 3; k++) diamond(ctx, cx - 16 + k * 16, y + ch - 30, 5, k < c ? SIGCOL[d.sig] : 'rgba(255,255,255,.12)', null);
+      txt(c >= 3 ? 'COMPLETES SET' : `${d.sig} ${Math.min(c, 3)}/3`, cx, y + ch - 12, `600 10px ${MONO}`, c >= 3 ? C.gold : '#9a9289', 'center', 3); }
+    if (chosen) { ctx.save(); ctx.translate(cx, y + ch - 2); ctx.rotate(-.06); rrect(ctx, -58, -16, 116, 30, 4); ctx.fillStyle = '#0a080c'; ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.stroke();
+      txt(o.kind === 'weapon' ? 'EQUIPPED' : o.kind === 'draft' ? 'DRAFTED' : 'BOUGHT', 0, 6, `900 18px ${DISP}`, col, 'center', 3); ctx.restore(); }
+    ctx.restore();
+  }
+  if (!decided || o.pick >= 0) { const px = x0 + hov * (cw + gap) + cw / 2, py = y0 + ch + 30 + S(t * 10) * 2;
+    ctx.fillStyle = C.gold; ctx.beginPath(); ctx.moveTo(px, py - 10); ctx.lineTo(px + 8, py + 2); ctx.lineTo(px - 8, py + 2); ctx.fill(); }
+  if (decided && o.pick < 0) txt('NOT ENOUGH WAX · YOU WALK ON', W / 2, y0 + ch + 34, `600 12px ${MONO}`, '#9a9289', 'center', 3);
+  txt(o.kind === 'shop' ? '← →  CHOOSE     J / SPACE  BUY     SHIFT  LEAVE' : '← →  CHOOSE     J / SPACE  CONFIRM', W / 2, y0 + ch + 66, `600 11px ${MONO}`, '#6f675f', 'center', 3);
+  ctx.restore();
+}
+
+// the Tenebrae hearse: fifteen candles on a triangle, one goes out per depth; the small one below is the hidden candle
+function hearse(ctx, x, y, depth, hidden, t) {
+  const out = (depth - 1) % 15, w = 150, top = 46;
+  ctx.save(); ctx.lineCap = 'round';
+  ctx.strokeStyle = '#3a2f2a'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + w / 2, y - top); ctx.lineTo(x + w, y); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x + w / 2, y); ctx.lineTo(x + w / 2, y + 12); ctx.stroke();
+  for (let i = 0; i < 15; i++) {
+    // candles go out alternately from the two ends toward the top, as in the service
+    const order = i % 2 ? 14 - (i >> 1) : i >> 1, lit = i >= out;
+    const cx = x + 5 + order * (w - 10) / 14, cy = y - top * (1 - Math.abs(order - 7) / 7) - 2;
+    ctx.fillStyle = lit ? '#e8dccb' : '#5a524c'; ctx.fillRect(cx - 1.5, cy - 9, 3, 9);
+    if (lit) { const fl = 1 + S(t * 13 + i * 1.7) * .15; ctx.fillStyle = C.gold; ctx.shadowColor = C.gold; ctx.shadowBlur = 8;
+      ctx.beginPath(); ctx.ellipse(cx, cy - 12, 2 * fl, 3.6 * fl, 0, 0, TAU); ctx.fill(); ctx.shadowBlur = 0; }
+    else { ctx.strokeStyle = 'rgba(200,190,180,.25)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(cx, cy - 10); ctx.quadraticCurveTo(cx + S(t * 2 + i) * 4, cy - 16, cx + S(t * 2.6 + i) * 3, cy - 22); ctx.stroke(); }
+  }
+  ctx.font = `600 10px ${MONO}`; ctx.textAlign = 'left'; ctx.lineWidth = 3; ctx.strokeStyle = '#000';
+  const lab = `${15 - out} OF 15 LIT`; ctx.strokeText(lab, x + w / 2 + 12, y + 24); ctx.fillStyle = '#9a9289'; ctx.fillText(lab, x + w / 2 + 12, y + 24);
+  const hx = x + w / 2, hy = y + 26;
+  ctx.fillStyle = '#d9cfc0'; ctx.fillRect(hx - 1.5, hy - 7, 3, 7);
+  if (hidden) { ctx.fillStyle = C.crimson; ctx.shadowColor = C.crimson; ctx.shadowBlur = 10; ctx.beginPath(); ctx.ellipse(hx, hy - 10, 2, 3.4, 0, 0, TAU); ctx.fill(); }
+  ctx.restore();
+}
+
+function drawSummary(ctx, st, W, H, txt) {
+  const o = st.ov, t = o.t, fade = clamp(t * 3, 0, 1) * clamp((o.dur - t) * 3, 0, 1);
+  ctx.save(); ctx.globalAlpha = fade * .88; ctx.fillStyle = '#050304'; ctx.fillRect(0, 0, W, H); ctx.restore();
+  ctx.save(); ctx.globalAlpha = fade;
+  ctx.shadowColor = C.crimson; ctx.shadowBlur = 28; txt('LIGHTS OUT', W / 2, 100, `900 64px ${DISP}`, C.crimson, 'center', 6); ctx.shadowBlur = 0;
+  txt(`RUN #${o.run} · HANGING SPIRE · SEED ${seedHex(o.seed)} · PERMADEATH`, W / 2, 126, `600 12px ${MONO}`, '#9a9289', 'center', 3);
+  const cols = [['DEPTH', String(o.depth), o.newBest ? 'NEW BEST' : `BEST ${o.best}`], ['TIME', fmtT(o.time), 'ENDLESS'], ['BOSSES', String(o.bosses), 'SLAIN'], ['KILLS', String(o.kills), 'THIS RUN']];
+  cols.forEach(([a, b, c], i) => { const x = W / 2 + (i - 1.5) * 150, k = clamp(t * 3 - .5 - i * .25, 0, 1); ctx.globalAlpha = fade * k;
+    txt(a, x, 170, `600 11px ${MONO}`, '#9a9289', 'center', 3); txt(b, x, 212, `900 44px ${DISP}`, '#f3ebe0', 'center', 5); txt(c, x, 232, `600 10px ${MONO}`, c === 'NEW BEST' ? C.gold : '#6f675f', 'center', 3); });
+  ctx.globalAlpha = fade;
+  // build chips
+  ctx.font = `600 11px ${MONO}`; const chips = o.build.map((n, i) => { const d = RUNE_DEFS[n]; return [n.toUpperCase(), i === 0 ? C.gold : d.rar === 'cursed' ? C.crimson : SIGCOL[d.sig]]; });
+  const ws = chips.map(c => ctx.measureText(c[0]).width + 20), tw = ws.reduce((a, b) => a + b, 0) + (chips.length - 1) * 8; let cx = (W - tw) / 2;
+  txt('BUILD', W / 2, 262, `600 10px ${MONO}`, '#6f675f', 'center', 3);
+  chips.forEach(([s, c], i) => { rrect(ctx, cx, 272, ws[i], 24, 12); ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fill(); ctx.strokeStyle = c; ctx.lineWidth = 1.2; ctx.stroke(); txt(s, cx + ws[i] / 2, 288, `600 11px ${MONO}`, c, 'center', 3); cx += ws[i] + 8; });
+  // wax
+  const ki = clamp((t - 1.2) / .8, 0, 1);
+  txt(`WAX COLLECTED  ${o.wax}`, W / 2 - 20, 336, `600 13px ${MONO}`, '#f3ebe0', 'right', 3);
+  txt(`40% KEPT${o.bosses ? ' + BOSS BONUS' : ''}  +${Math.round(o.kept * ki)}`, W / 2 + 20, 336, `600 13px ${MONO}`, C.cyan, 'left', 3);
+  // unlock progress
+  const bw = 440, bx = (W - bw) / 2, by = 372, fk = lerp(o.from, Math.min(1, o.to), easeOut(clamp((t - 1.8) / 1.2, 0, 1)));
+  txt(`NEXT UNLOCK · ${o.U[0]}`, bx, by - 8, `600 12px ${MONO}`, '#f3ebe0', 'left', 3); txt(o.U[1], bx + bw, by - 8, `600 11px ${MONO}`, '#9a9289', 'right', 3);
+  ctx.fillStyle = 'rgba(255,255,255,.08)'; ctx.fillRect(bx, by, bw, 12);
+  ctx.save(); ctx.fillStyle = C.gold; ctx.shadowColor = C.gold; ctx.shadowBlur = 12; ctx.fillRect(bx, by, bw * fk, 12); ctx.restore();
+  if (o.unlocked && t > 3.1) { const k = easeOut(clamp((t - 3.1) * 4, 0, 1)); ctx.save(); ctx.translate(W / 2, by + 52); ctx.scale(1.6 - k * .6, 1.6 - k * .6); ctx.globalAlpha = fade * k;
+    ctx.shadowColor = C.gold; ctx.shadowBlur = 26; txt(`UNLOCKED · ${o.unlocked[0]}`, 0, 0, `900 34px ${DISP}`, C.gold, 'center', 5); ctx.restore();
+    txt(`IT CAN NOW APPEAR IN YOUR DRAWS · NEXT: ${o.next[0]}`, W / 2, by + 80, `600 11px ${MONO}`, '#9a9289', 'center', 3); }
+  else if (!o.unlocked) txt(`${Math.round(Math.min(1, o.to) * 100)}% · KEEP CLIMBING`, W / 2, by + 34, `600 11px ${MONO}`, '#9a9289', 'center', 3);
+  if (o.arena && t > 3.6) txt('ARENA UNLOCKED THIS RUN · THE DROWNED WELL', W / 2, by + 108, `600 12px ${MONO}`, C.cyan, 'center', 3);
+  txt(t > 2.5 ? 'PRESS J OR SPACE TO RELIGHT THE CANDLES · NEW SEED · NEW DRAWS' : 'LIGHTS OUT', W / 2, H - 26, `600 12px ${MONO}`, '#6f675f', 'center', 3);
+  ctx.restore();
+}
+
+/* ---------- loop ---------- */
+const io = 'IntersectionObserver' in window ? new IntersectionObserver(es => es.forEach(en => { const r = R.find(x => x.cv === en.target); if (r) r.vis = en.isIntersecting; }), { rootMargin: '100px' }) : null;
+
+R.filter(r => r.cv.id === 'cv-demo').forEach(r => { r.ctx.setTransform(dpr, 0, 0, dpr, 0, 0); for (let i = 0; i < 30; i++) r.fn(r.ctx, 0, 1 / 30, r); });
+const draw = (r, dt) => { r.ctx.setTransform(dpr, 0, 0, dpr, 0, 0); r.fn(r.ctx, r.t, dt, r); };
+if (reduce) {
+  R.forEach(r => { r.t = .55; draw(r, 0); });
+} else {
+  let last = performance.now();
+  const frame = now => {
+    const dt = clamp((now - last) / 1000, 0, .05); last = now;
+    for (const r of R) if (r.vis) { r.t += dt; draw(r, dt); }
+    requestAnimationFrame(frame);
+  };
+  R.forEach(r => draw(r, 0));
+  requestAnimationFrame(frame);
+}
+})();
+</script>

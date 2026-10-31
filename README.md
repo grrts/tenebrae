@@ -47,3 +47,7 @@ The name comes from an old church service where 15 candles on a triangular stand
 
 - Maps are read with `FileAccess` from `res://maps`. For an exported build, add `maps/*.txt` to the export preset's non-resource include filter.
 - There's no render interpolation yet. At 120 Hz physics this is fine on 60 and 120 Hz screens; add interpolation before testing on 144 Hz or higher.
+
+## Playable browser build
+
+`web/tenebrae-play.html` is a playable browser version of the same design (keyboard or controller), published as a link with every update. It is generated from the pitch page source with `python3 web/build_play.py` run inside `web/`. A Godot web export will replace it once the build is hosted.
