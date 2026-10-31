@@ -78,6 +78,7 @@ var opt_flashes := true ## false is photosensitivity mode: no full-screen flashe
 var opt_hitstop := true
 var opt_speed := 1.0 ## game speed: 1, 0.85 or 0.7
 var opt_hearts := false ## assist: +40 HP; achievements still count
+var opt_hud := 1.0 ## accessibility: in-run HUD scale, 1.0 to 1.5
 
 # --smoke (used by CI): a bot mashes inputs, depths fly by, and the run is forced
 # through the boss, the hidden candle and a death, then the game quits.
@@ -233,6 +234,7 @@ func _smoke(dt: float) -> void:
 					skill_meter = 1.0
 					use_skill()
 				print("smoke test: all weapon skills fired")
+				opt_hud = 1.5
 				# controls: rebind jump to L, check the map and the dev keys, then back to defaults
 				open_controls()
 				m = hud.menu
@@ -393,6 +395,7 @@ func open_options() -> void:
 		{"id": "stop", "name": "HIT-STOP %s" % ("ON" if opt_hitstop else "OFF"), "desc": "The tiny freeze when a hit lands.", "tag": "OPTION"},
 		{"id": "speed", "name": "SPEED %d%%" % roundi(opt_speed * 100), "desc": "Assist: slow the whole game to 85 or 70%. Achievements still count.", "tag": "ASSIST"},
 		{"id": "hearts", "name": "+40 HP %s" % ("ON" if opt_hearts else "OFF"), "desc": "Assist: start each run with 40 extra HP. Applies next run.", "tag": "ASSIST"},
+		{"id": "hud", "name": "HUD SIZE %d%%" % roundi(opt_hud * 100), "desc": "Bigger health bar, meters and run info: 100, 125 or 150%.", "tag": "OPTION"},
 		{"id": "full", "name": "FULLSCREEN %s" % ("ON" if opt_fullscreen else "OFF"), "desc": "Fill the screen, or play in a window.", "tag": "OPTION"},
 		{"id": "controls", "name": "CONTROLS", "desc": "Rebind keys and mouse buttons. A controller always works.", "tag": "OPTION"},
 		{"id": "back", "name": "BACK", "desc": "Return to the pause menu.", "tag": ""},
@@ -413,6 +416,8 @@ func _option_pick(i: int, opts: Array) -> void:
 			Engine.time_scale = opt_speed
 		"hearts":
 			opt_hearts = not opt_hearts
+		"hud":
+			opt_hud = 1.25 if opt_hud < 1.1 else (1.5 if opt_hud < 1.4 else 1.0)
 		"full":
 			opt_fullscreen = not opt_fullscreen
 			_apply_options()
@@ -787,6 +792,7 @@ func _load_meta() -> void:
 		opt_hitstop = _cfg_bool(cfg, "options", "hitstop", true)
 		opt_speed = _cfg_float(cfg, "options", "speed", 1.0)
 		opt_hearts = _cfg_bool(cfg, "options", "hearts", false)
+		opt_hud = clampf(_cfg_float(cfg, "options", "hud", 1.0), 1.0, 1.5)
 		opt_up_jump = _cfg_bool(cfg, "controls", "up_jump", true)
 		binds = _cfg_dict(cfg, "controls", "binds", {})
 		# keep hand-edited or damaged values inside what the game can use
@@ -814,6 +820,7 @@ func _save_meta() -> void:
 	cfg.set_value("options", "hitstop", opt_hitstop)
 	cfg.set_value("options", "speed", opt_speed)
 	cfg.set_value("options", "hearts", opt_hearts)
+	cfg.set_value("options", "hud", opt_hud)
 	cfg.set_value("controls", "up_jump", opt_up_jump)
 	cfg.set_value("controls", "binds", binds)
 	cfg.set_value("meta", "save_version", SAVE_VERSION)

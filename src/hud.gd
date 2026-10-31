@@ -201,10 +201,14 @@ func _text(s: String, pos: Vector2, size: int, col: Color, center := false) -> v
 
 
 func _paint() -> void:
-	var vp := canvas.get_viewport_rect().size
+	var full := canvas.get_viewport_rect().size
 	var p := game.player
 	if p == null:
 		return
+	# the in-run HUD draws at the player's HUD size; menus and screens below stay at 100%
+	var hs: float = game.opt_hud
+	var vp := full / hs
+	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2(hs, hs))
 	# health bar: the gold trail shows recent damage. HP shows as 20 per internal hit point
 	var mh := int(p.max_hp)
 	var bw := 34.0 * mh
@@ -250,6 +254,8 @@ func _paint() -> void:
 		_text(banner_sub, Vector2(vp.x / 2, vp.y * 0.36 + 30), 16, Color(0.95, 0.7, 0.4, a), true)
 
 
+	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	vp = full
 	if p.dead and summary == null:
 		_paint_death(vp)
 	if title_screen != null:
