@@ -1,11 +1,11 @@
 ; Engine configuration file.
-; Tenebrae prototype: grey-box feel test, no final art.
+; Wickbearer prototype: grey-box feel test, no final art.
 
 config_version=5
 
 [application]
 
-config/name="Tenebrae Prototype"
+config/name="Wickbearer Prototype"
 run/main_scene="res://main.tscn"
 config/features=PackedStringArray("4.3")
 

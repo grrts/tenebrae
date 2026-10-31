@@ -29,7 +29,7 @@ const PROLOGUE := [
 	{"who": "SAINT UMBER", "text": "I carried it down every winter. This winter the dark can keep it. And me.", "sfx": "ZAN", "flash": RED},
 	{"text": "In the soot beneath the hearse, something made of old wicks opened its eyes."},
 	{"who": "ABBESS HILD", "text": "I made you from burnt-out wicks, little one. You can walk where light cannot. Bring it home."},
-	{"title": "TENEBRAE", "sub": "CHAPTER I  ·  THE PIT OF PSALMS  ·  DEPTHS I-IV", "col": GOLD},
+	{"title": "WICKBEARER", "sub": "CHAPTER I  ·  THE PIT OF PSALMS  ·  DEPTHS I-IV", "col": GOLD},
 ]
 
 const INTROS := [

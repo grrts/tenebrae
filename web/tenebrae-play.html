@@ -1,4 +1,4 @@
-<title>Tenebrae Playtest</title>
+<title>Wickbearer Pitch Sheet</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Barlow:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@500;600&family=Cinzel:wght@600;800&family=Cormorant+Garamond:ital,wght@0,500;1,500&display=swap">
@@ -10,7 +10,7 @@
   .keys { padding: 10px 16px; color: var(--muted); text-align: center; letter-spacing: .04em; line-height: 1.6; }
   .keys b { color: var(--text); font-weight: 600; }
 </style>
-<canvas id="cv-demo" tabindex="0" aria-label="Tenebrae playtest"></canvas>
+<canvas id="cv-demo" tabindex="0" aria-label="Wickbearer playtest"></canvas>
 <div class="keys"><b>M</b> sound on/off · <b>ESC</b> skip cutscene · <b>J</b> next shot · <b>A D</b> move · <b>SPACE</b> jump, double jump, wall jump · <b>J</b> attack (tap for combo) · <b>S + J</b> in air: slam · <b>SHIFT</b> dash · <b>S + SPACE</b> drop · controller works too</div>
 <script>
 (() => {
@@ -1506,7 +1506,7 @@ const STORY = (() => {
     { d: 3, flash: 'white', shake: [0, .35],
       draw(c, t, W, H) { fill(c, W, H, '#0a0507'); focus(c, W, H, W / 2, H * .5, t, '255,200,150', .6); glow(c, W / 2, H * .55, 300, '229,56,59', .35);
         wick(c, W / 2, H * .95, 3.6, 'ready', t, { wind: 1.6 }); embers(c, W, H, t, 60, '255,150,80', 160); } },
-    { d: 4, bars: false, draw(c, t, W, H) { card(c, W, H, t, 4, 'TENEBRAE', 'CHAPTER I  ·  THE PIT OF PSALMS  ·  DEPTHS I-IV'); } }
+    { d: 4, bars: false, draw(c, t, W, H) { card(c, W, H, t, 4, 'WICKBEARER', 'CHAPTER I  ·  THE PIT OF PSALMS  ·  DEPTHS I-IV'); } }
   ];
   const bossIntro = (i, sfxWord, line, scene) => [
     { d: 1.9, flash: 'red', shake: [0, .8], draw(c, t, W, H) { scene(c, t, W, H); sfx(c, sfxWord, W / 2, H * .55, 130, -.08, '#fff4ea', t); } },
@@ -1580,7 +1580,7 @@ const STORY = (() => {
   ];
   SC.boss3 = [
     { d: 3.2, say: [null, 'The fifteenth candle goes out.'], draw(c, t, W, H) { fill(c, W, H, '#000'); bigHearse(c, W / 2, H * .62, 3.2, t < 1.4 ? 14 : 15, false, t);
-      c.fillStyle = `rgba(0,0,0,${k01(t, 1.5, 1.2) * .9})`; c.fillRect(0, 0, W, H); c.save(); c.globalAlpha = k01(t, 2, .8); c.font = `600 22px ${SERIF}`; c.fillStyle = '#6f675f'; spaced(c, 'TENEBRAE', W / 2, H / 2, 16); c.restore(); } },
+      c.fillStyle = `rgba(0,0,0,${k01(t, 1.5, 1.2) * .9})`; c.fillRect(0, 0, W, H); c.save(); c.globalAlpha = k01(t, 2, .8); c.font = `600 22px ${SERIF}`; c.fillStyle = '#6f675f'; spaced(c, 'WICKBEARER', W / 2, H / 2, 16); c.restore(); } },
     { d: 2.6, shake: [0, 1], say: [null, 'And in the dark, the noise begins.'], draw(c, t, W, H) { fill(c, W, H, Math.floor(t * 6) % 2 ? '#2a0508' : '#000');
       sfx(c, 'DOM!', W * .25, H * .35, 110, -.15, C.crimson, t); if (t > .6) sfx(c, 'DOM!', W * .7, H * .3, 130, .12, C.crimson, t - .6); if (t > 1.2) sfx(c, 'DOM!!', W * .5, H * .68, 170, -.05, '#fff4ea', t - 1.2); } },
     { d: 2.6, draw(c, t, W, H) { fill(c, W, H, '#030105'); drawBrute(c, W / 2, H * 1.08, 4.2, 0, 1, Object.assign({ third: 1, glow: 30 }, LOOK[3], { headExtra: candleCrown(Math.floor(t * 4)) })); focus(c, W, H, W / 2, H * .3, t, '180,77,255', .35, 80, 260); } },
@@ -2886,8 +2886,17 @@ function arenaSim(ctx, rdt, r) {
   }
   /* ---- HUD ---- */
   const txt = (s2, x, y, font, col, align = 'left', lw = 4) => { ctx.font = font; ctx.textAlign = align; ctx.lineWidth = lw; ctx.strokeStyle = '#000'; ctx.strokeText(s2, x, y); ctx.fillStyle = col; ctx.fillText(s2, x, y); };
-  for (let i = 0; i < st.maxHp; i++) heart(ctx, 26 + i * 26, 30, 1, i < st.hp);
-  if (st.maxHp < 5) txt('CURSED', 26 + st.maxHp * 26 - 4, 36, `600 10px ${MONO}`, C.crimson, 'left', 3);
+  { // health bar: one segment per heart
+    const bw = 34 * st.maxHp, bx = 16, by = 18, k = clamp(st.hp / st.maxHp, 0, 1);
+    st.hpShow = st.hpShow == null ? k : st.hpShow + (k - st.hpShow) * .08;
+    ctx.save(); ctx.fillStyle = 'rgba(0,0,0,.75)'; ctx.fillRect(bx - 2, by - 2, bw + 4, 18);
+    ctx.fillStyle = 'rgba(242,180,58,.55)'; ctx.fillRect(bx, by, bw * Math.max(st.hpShow, k), 14);
+    ctx.fillStyle = C.crimson; ctx.shadowColor = C.crimson; ctx.shadowBlur = st.hp <= 1 ? 10 + S(st.time * 10) * 6 : 6; ctx.fillRect(bx, by, bw * k, 14); ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(0,0,0,.8)'; for (let i = 1; i < st.maxHp; i++) ctx.fillRect(bx + i * 34 - 1, by, 2, 14);
+    ctx.restore();
+    txt(`${st.hp} / ${st.maxHp}`, bx + bw + 10, by + 12, `600 12px ${MONO}`, '#f3ebe0', 'left', 3);
+    if (st.maxHp < 5) txt('CURSED', bx + bw + 58, by + 12, `600 10px ${MONO}`, C.crimson, 'left', 3);
+  }
   diamond(ctx, 24, 62, 7, C.cyan, null, 8);
   txt(String(st.runWax), 36, 67, `600 14px ${MONO}`, '#f3ebe0');
   txt('RUN WAX', 36 + ctx.measureText(String(st.runWax)).width + 8, 67, `600 10px ${MONO}`, '#9a9289', 'left', 3);

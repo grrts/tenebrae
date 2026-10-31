@@ -1,7 +1,7 @@
 class_name Hud
 extends CanvasLayer
 ## Hearts, the candle hearse (depth meter), depth title and banners.
-## The hearse follows the Tenebrae service: 15 candles on a triangle go out
+## The hearse follows the Tenebrae service (the rite behind Wickbearer): 15 candles on a triangle go out
 ## one per depth, alternating from the two ends toward the top. The small
 ## crimson candle under it is the hidden candle, the one revive per run.
 
@@ -21,6 +21,7 @@ var scene = null
 var title_screen = null
 # achievement toasts: [{name, t}]
 var toasts: Array = []
+var hp_show := 1.0
 var flash_col := Color.WHITE
 var flash_t := 0.0
 
@@ -150,10 +151,18 @@ func _paint() -> void:
 	var p := game.player
 	if p == null:
 		return
-	# hearts
-	for i in int(p.max_hp):
-		var c := Color("#e5383b") if i < p.hp else Color(0.25, 0.2, 0.2)
-		canvas.draw_circle(Vector2(vp.x - 30 - i * 24, 30), 8, c)
+	# health bar: one segment per heart, the gold trail shows recent damage
+	var mh := int(p.max_hp)
+	var bw := 34.0 * mh
+	var bx := vp.x - 30 - bw
+	var k := clampf(p.hp / p.max_hp, 0, 1)
+	hp_show = move_toward(hp_show, k, get_process_delta_time() * 0.6) if hp_show > k else k
+	canvas.draw_rect(Rect2(bx - 2, 20, bw + 4, 18), Color(0, 0, 0, 0.75))
+	canvas.draw_rect(Rect2(bx, 22, bw * hp_show, 14), Color(0.95, 0.7, 0.23, 0.55))
+	canvas.draw_rect(Rect2(bx, 22, bw * k, 14), Color("#e5383b"))
+	for i in range(1, mh):
+		canvas.draw_rect(Rect2(bx + i * 34 - 1, 22, 2, 14), Color(0, 0, 0, 0.8))
+	_text("%d / %d" % [int(p.hp), mh], Vector2(bx - 64, 35), 13, Color("#f3ebe0"))
 	# depth title
 	var title := "DEPTH %s" % Game.roman(game.depth)
 	_text(title, Vector2(vp.x / 2, 52), 34, Color("#e5383b") if game.depth >= 7 else Color("#f3ebe0"), true)
@@ -211,7 +220,7 @@ func _paint_title(vp: Vector2) -> void:
 	# a slow candle glow behind the name
 	for i in 6:
 		canvas.draw_circle(Vector2(mid.x, mid.y - 70), 40.0 + i * 34, Color(1, 0.65, 0.25, 0.035))
-	_text("TENEBRAE", Vector2(mid.x, mid.y - 50), 84, Color(0.95, 0.92, 0.88, clampf(t * 1.5, 0, 1)), true)
+	_text("WICKBEARER", Vector2(mid.x, mid.y - 50), 84, Color(0.95, 0.92, 0.88, clampf(t * 1.5, 0, 1)), true)
 	_text("FIFTEEN CANDLES  ·  ONE HIDDEN FLAME  ·  BRING IT HOME", Vector2(mid.x, mid.y - 10), 14, Color("#f2b43a"), true)
 	if game.vigil_max > 0:
 		var v := game.vigil

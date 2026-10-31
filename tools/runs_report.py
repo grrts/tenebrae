@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Playtest report from Tenebrae run logs.
+"""Playtest report from Wickbearer run logs.
 
 Each build appends one JSON line per run to user://runs.jsonl
-(Windows: %APPDATA%/Godot/app_userdata/Tenebrae Prototype/runs.jsonl,
-Linux: ~/.local/share/godot/app_userdata/Tenebrae Prototype/runs.jsonl).
+(Windows: %APPDATA%/Godot/app_userdata/Wickbearer Prototype/runs.jsonl,
+Linux: ~/.local/share/godot/app_userdata/Wickbearer Prototype/runs.jsonl).
 Collect testers' files into one folder and run:  python3 tools/runs_report.py <folder or files>
 It prints the numbers the plan's playtesting section asks for: deaths by depth,
 time to first death, rune pick rates, weapon win rates and boss reach.

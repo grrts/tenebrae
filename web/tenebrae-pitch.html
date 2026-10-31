@@ -1,4 +1,4 @@
-<title>Tenebrae Pitch Sheet</title>
+<title>Wickbearer Pitch Sheet</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Barlow:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@500;600&display=swap">
@@ -149,7 +149,7 @@ td .m, .m { color: var(--muted); }
     </div>
     <div class="cap-meta">
       <span class="eyebrow">Steam header capsule mock · 460 × 215 ratio · rendered live</span>
-      <span class="eyebrow">Tenebrae: Latin for darkness</span>
+      <span class="eyebrow">Wickbearer: carry the hidden flame home</span>
     </div>
   </section>
 
@@ -158,7 +158,7 @@ td .m, .m { color: var(--muted); }
       <span class="eyebrow">The goal</span>
       <h2>Vertical arena fights that move like a stick-fight animation</h2>
     </div>
-    <blockquote>Ship <em>Tenebrae</em> on Steam: a dark, fast, skill-based <em>stickman action roguelike</em> set in <em>tall vertical arenas</em>. You wall-jump, double jump, drop through ledges and slam down onto shadow creatures that pour out of portals on every floor of <em>huge, multi-screen arenas</em>. There are no waves and no finish line: each run is endless, enemies keep getting stronger the deeper you go, and a boss rises every few depths. Each run deals you new weapons and runes, and beating an arena's boss unlocks a harder arena. Every move flows into the next with trails, afterimages and follow-through. Launch in Early Access with 5 arenas, 5 weapons and 4 characters, locked at 60 fps on Steam Deck.</blockquote>
+    <blockquote>Ship <em>Wickbearer</em> on Steam: a dark, fast, skill-based <em>stickman action roguelike</em> set in <em>tall vertical arenas</em>. You wall-jump, double jump, drop through ledges and slam down onto shadow creatures that pour out of portals on every floor of <em>huge, multi-screen arenas</em>. There are no waves and no finish line: each run is endless, enemies keep getting stronger the deeper you go, and a boss rises every few depths. Each run deals you new weapons and runes, and beating an arena's boss unlocks a harder arena. Every move flows into the next with trails, afterimages and follow-through. Launch in Early Access with 5 arenas, 5 weapons and 4 characters, locked at 60 fps on Steam Deck.</blockquote>
     <div class="facts">
       <div><b>Steam · PC</b><span>Windows at launch, Steam Deck Verified</span></div>
       <div><b>Godot 4</b><span>Free engine, strong 2D, no royalties</span></div>
@@ -218,7 +218,7 @@ td .m, .m { color: var(--muted); }
       <span class="eyebrow">Roguelike systems</span>
       <h2>Every run is different</h2>
       <p>A run is one endless descent into one arena. There are no waves: depth rises over time, enemies keep scaling, and the run only ends when you die. Everything you pick up is lost then, except a share of your wax.</p>
-      <p><b>Why Tenebrae.</b> Tenebrae is an old church service in which fifteen candles on a triangular stand are put out one by one until the church is dark. Then a loud crash, the strepitus, sounds, and one hidden candle is brought back. The run follows that rite. The HUD's candle stand is your depth meter, and one candle goes out per depth. The light around you shrinks as they go out. Bosses enter on the crash. The hidden candle is your one revive per run.</p>
+      <p><b>Why Wickbearer.</b> You are the Wick, made of burnt-out candle wicks, carrying the stolen flame home. The world runs on Tenebrae, an old church service in which fifteen candles on a triangular stand are put out one by one until the church is dark. Then a loud crash, the strepitus, sounds, and one hidden candle is brought back. The run follows that rite. The HUD's candle stand is your depth meter, and one candle goes out per depth. The light around you shrinks as they go out. Bosses enter on the crash. The hidden candle is your one revive per run.</p>
     </div>
     <div class="sys">
       <div><span class="k">Start</span><h3>Weapon draw</h3><p>You start each run by picking 1 of 2 random weapons from your unlocked arsenal. More weapons can drop mid-run.</p></div>
@@ -2081,8 +2081,17 @@ function arenaSim(ctx, rdt, r) {
   }
   /* ---- HUD ---- */
   const txt = (s2, x, y, font, col, align = 'left', lw = 4) => { ctx.font = font; ctx.textAlign = align; ctx.lineWidth = lw; ctx.strokeStyle = '#000'; ctx.strokeText(s2, x, y); ctx.fillStyle = col; ctx.fillText(s2, x, y); };
-  for (let i = 0; i < st.maxHp; i++) heart(ctx, 26 + i * 26, 30, 1, i < st.hp);
-  if (st.maxHp < 5) txt('CURSED', 26 + st.maxHp * 26 - 4, 36, `600 10px ${MONO}`, C.crimson, 'left', 3);
+  { // health bar: one segment per heart
+    const bw = 34 * st.maxHp, bx = 16, by = 18, k = clamp(st.hp / st.maxHp, 0, 1);
+    st.hpShow = st.hpShow == null ? k : st.hpShow + (k - st.hpShow) * .08;
+    ctx.save(); ctx.fillStyle = 'rgba(0,0,0,.75)'; ctx.fillRect(bx - 2, by - 2, bw + 4, 18);
+    ctx.fillStyle = 'rgba(242,180,58,.55)'; ctx.fillRect(bx, by, bw * Math.max(st.hpShow, k), 14);
+    ctx.fillStyle = C.crimson; ctx.shadowColor = C.crimson; ctx.shadowBlur = st.hp <= 1 ? 10 + S(st.time * 10) * 6 : 6; ctx.fillRect(bx, by, bw * k, 14); ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(0,0,0,.8)'; for (let i = 1; i < st.maxHp; i++) ctx.fillRect(bx + i * 34 - 1, by, 2, 14);
+    ctx.restore();
+    txt(`${st.hp} / ${st.maxHp}`, bx + bw + 10, by + 12, `600 12px ${MONO}`, '#f3ebe0', 'left', 3);
+    if (st.maxHp < 5) txt('CURSED', bx + bw + 58, by + 12, `600 10px ${MONO}`, C.crimson, 'left', 3);
+  }
   diamond(ctx, 24, 62, 7, C.cyan, null, 8);
   txt(String(st.runWax), 36, 67, `600 14px ${MONO}`, '#f3ebe0');
   txt('RUN WAX', 36 + ctx.measureText(String(st.runWax)).width + 8, 67, `600 10px ${MONO}`, '#9a9289', 'left', 3);

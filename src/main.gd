@@ -47,7 +47,7 @@ var bosses := 0
 var run_time := 0.0
 var pickups: Array = []
 # meta, saved between sessions
-const SAVE_PATH := "user://tenebrae.cfg"
+const SAVE_PATH := "user://wickbearer.cfg"
 var bank := 0
 var earned := 0
 var seen: Array = []

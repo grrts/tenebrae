@@ -268,7 +268,7 @@ const STORY = (() => {
     { d: 3, flash: 'white', shake: [0, .35],
       draw(c, t, W, H) { fill(c, W, H, '#0a0507'); focus(c, W, H, W / 2, H * .5, t, '255,200,150', .6); glow(c, W / 2, H * .55, 300, '229,56,59', .35);
         wick(c, W / 2, H * .95, 3.6, 'ready', t, { wind: 1.6 }); embers(c, W, H, t, 60, '255,150,80', 160); } },
-    { d: 4, bars: false, draw(c, t, W, H) { card(c, W, H, t, 4, 'TENEBRAE', 'CHAPTER I  ·  THE PIT OF PSALMS  ·  DEPTHS I-IV'); } }
+    { d: 4, bars: false, draw(c, t, W, H) { card(c, W, H, t, 4, 'WICKBEARER', 'CHAPTER I  ·  THE PIT OF PSALMS  ·  DEPTHS I-IV'); } }
   ];
   const bossIntro = (i, sfxWord, line, scene) => [
     { d: 1.9, flash: 'red', shake: [0, .8], draw(c, t, W, H) { scene(c, t, W, H); sfx(c, sfxWord, W / 2, H * .55, 130, -.08, '#fff4ea', t); } },
@@ -342,7 +342,7 @@ const STORY = (() => {
   ];
   SC.boss3 = [
     { d: 3.2, say: [null, 'The fifteenth candle goes out.'], draw(c, t, W, H) { fill(c, W, H, '#000'); bigHearse(c, W / 2, H * .62, 3.2, t < 1.4 ? 14 : 15, false, t);
-      c.fillStyle = `rgba(0,0,0,${k01(t, 1.5, 1.2) * .9})`; c.fillRect(0, 0, W, H); c.save(); c.globalAlpha = k01(t, 2, .8); c.font = `600 22px ${SERIF}`; c.fillStyle = '#6f675f'; spaced(c, 'TENEBRAE', W / 2, H / 2, 16); c.restore(); } },
+      c.fillStyle = `rgba(0,0,0,${k01(t, 1.5, 1.2) * .9})`; c.fillRect(0, 0, W, H); c.save(); c.globalAlpha = k01(t, 2, .8); c.font = `600 22px ${SERIF}`; c.fillStyle = '#6f675f'; spaced(c, 'WICKBEARER', W / 2, H / 2, 16); c.restore(); } },
     { d: 2.6, shake: [0, 1], say: [null, 'And in the dark, the noise begins.'], draw(c, t, W, H) { fill(c, W, H, Math.floor(t * 6) % 2 ? '#2a0508' : '#000');
       sfx(c, 'DOM!', W * .25, H * .35, 110, -.15, C.crimson, t); if (t > .6) sfx(c, 'DOM!', W * .7, H * .3, 130, .12, C.crimson, t - .6); if (t > 1.2) sfx(c, 'DOM!!', W * .5, H * .68, 170, -.05, '#fff4ea', t - 1.2); } },
     { d: 2.6, draw(c, t, W, H) { fill(c, W, H, '#030105'); drawBrute(c, W / 2, H * 1.08, 4.2, 0, 1, Object.assign({ third: 1, glow: 30 }, LOOK[3], { headExtra: candleCrown(Math.floor(t * 4)) })); focus(c, W, H, W / 2, H * .3, t, '180,77,255', .35, 80, 260); } },

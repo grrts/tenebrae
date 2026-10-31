@@ -1,7 +1,7 @@
 import re, sys
 src = open('tenebrae-pitch.html').read()
 head = src[:src.index('<style>')]
-head = head.replace('<title>Tenebrae Pitch Sheet</title>', '<title>Tenebrae Playtest</title>')
+head = head.replace('<title>Tenebrae Pitch Sheet</title>', '<title>Wickbearer Playtest</title>')
 script = src[src.index('<script>'):]
 lines = script.split('\n')
 
@@ -144,7 +144,7 @@ page = head + r'''<style>
   .keys { padding: 10px 16px; color: var(--muted); text-align: center; letter-spacing: .04em; line-height: 1.6; }
   .keys b { color: var(--text); font-weight: 600; }
 </style>
-<canvas id="cv-demo" tabindex="0" aria-label="Tenebrae playtest"></canvas>
+<canvas id="cv-demo" tabindex="0" aria-label="Wickbearer playtest"></canvas>
 <div class="keys"><b>A D</b> move · <b>SPACE</b> jump, double jump, wall jump · <b>J</b> attack (tap for combo) · <b>S + J</b> in air: slam · <b>SHIFT</b> dash · <b>S + SPACE</b> drop · controller works too</div>
 ''' + script
 open('tenebrae-play.html', 'w').write(page)
