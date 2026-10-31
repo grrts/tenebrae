@@ -1,0 +1,17 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Cormorant+Garamond:ital,wght@1,500&display=block" rel="stylesheet">
+<style>html,body{margin:0;background:#000}
+.cap{position:relative;overflow:hidden;background:#050304 url(art.jpg) var(--pos,50% 50%)/cover no-repeat}
+.cap::after{content:'';position:absolute;inset:0;background:linear-gradient(transparent 52%,rgba(0,0,0,.88) 92%)}
+.logo,.sub{position:absolute;left:0;right:0;z-index:2;text-align:center}
+.logo{font-family:Cinzel,serif;font-weight:900;color:#f3ebe0;letter-spacing:.06em;text-shadow:0 0 .25em rgba(255,150,60,.6),0 .03em 0 #000}
+.sub{font-family:'Cormorant Garamond',serif;font-style:italic;color:#f2b43a;text-shadow:0 1px 3px #000}
+</style></head><body>
+<div id="c" class="cap"><div class="logo" id="l">WICKBEARER</div><div class="sub" id="s">Bring the hidden flame home</div></div>
+<script>
+const q=new URLSearchParams(location.search), w=+q.get('w'), h=+q.get('h'), logo=q.get('logo')!=='0';
+c.style.width=w+'px'; c.style.height=h+'px'; if(q.get('pos')) c.style.setProperty('--pos',q.get('pos'));
+const fs=Math.min(w*0.11,h*0.2); l.style.fontSize=fs+'px'; l.style.bottom=(h*0.06+fs*0.5)+'px'; s.style.fontSize=fs*0.3+'px'; s.style.bottom=h*0.045+'px';
+if(h<200) { s.style.display='none'; l.style.bottom=h*0.08+'px'; }
+if(!logo){ l.style.display=s.style.display='none'; c.classList.add('nologo'); document.styleSheets[1]; }
+</script></body></html>

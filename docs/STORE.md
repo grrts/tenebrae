@@ -58,7 +58,7 @@ Action Roguelike, Roguelite, 2D Platformer, Hack and Slash, Stickman, Dark Fanta
 | Screenshots | 1920 × 1080, at least 5 | One per dungeon plus a boss reveal card |
 | Trailer | 1080p, 60 to 90 s | Open on a slam, end on the candle going out |
 
-Drafts of the header, small and main capsules are in `docs/store/`, cut from a real Saint Umber frame of the browser build. `docs/store/capsule.html` lays the logo over any frame saved as `art.png` next to it; open it with `#920x430` (or any size) in the address. Final capsules should be painted at full resolution from the same composition.
+Key art and every capsule are in `docs/store/`: a 4K versus composition (Saint Umber against the wickbearer, split on the ZAN diagonal) built from 4K renders of the story scenes. `keyart-4k.jpg`, `library-hero.jpg` (no logo), and the header, small, main, vertical and library capsules at Steam's sizes. To re-render, open `docs/store/keyart.html?w=920&h=430` (any size; `logo=0` hides the logo, `pos=` moves the crop) or run `node docs/store/ka.js <path to keyart.html> <out folder>`.
 
 ## Trailer shot list (75 seconds)
 
