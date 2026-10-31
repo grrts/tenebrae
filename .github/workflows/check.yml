@@ -9,6 +9,8 @@ jobs:
     container: barichello/godot-ci:4.3
     steps:
       - uses: actions/checkout@v4
+      - name: Locals declared twice (Godot rejects these, gdparse does not)
+        run: python3 tools/check_locals.py src/*.gd
       - name: Import project
         run: godot --headless --import 2>&1 | tee import.log
       - name: Run the main scene for 600 frames

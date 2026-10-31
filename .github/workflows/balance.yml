@@ -1,0 +1,35 @@
+name: balance
+# The balance bot plays real runs (no cheats) and reports depth, time and wins.
+# Run it from the Actions tab, or it runs nightly.
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: Runs to play
+        default: "6"
+      vigil:
+        description: Vigil (0-5)
+        default: "0"
+  schedule:
+    - cron: "0 3 * * *"
+
+jobs:
+  balance:
+    runs-on: ubuntu-latest
+    container: barichello/godot-ci:4.3
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Import project
+        run: godot --headless --import > import.log 2>&1 || true
+      - name: Play runs
+        run: |
+          timeout 2400 godot --headless -- --balance "${{ github.event.inputs.runs || '6' }}" "${{ github.event.inputs.vigil || '0' }}" 2>&1 | tee balance.log
+          grep "balance:" balance.log | while read -r l; do echo "::notice::$l"; done
+          if grep -nE "SCRIPT ERROR|Invalid call|Invalid access" balance.log | head -5 | grep -q .; then grep -nE -A1 "SCRIPT ERROR|Invalid call|Invalid access" balance.log | head -20 | paste -sd'|' | sed 's/^/::error::/'; exit 1; fi
+          grep -q "balance: done" balance.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: balance-log
+          path: balance.log

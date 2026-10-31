@@ -63,6 +63,7 @@ var achieved: Array = []
 # Codex entry ids unlocked by play (see Codex)
 var codex: Array = []
 var relics: Array = []
+var bot: BalanceBot = null ## set by --balance
 var skill_meter := 0.0 ## 0..1, full = the weapon skill is ready
 var skill_hit := false ## true while a skill's own hits land, so they don't refill the meter
 var elite_kills := 0
@@ -139,6 +140,16 @@ func _ready() -> void:
 	hud.game = self
 	add_child(hud)
 	smoke = "--smoke" in OS.get_cmdline_user_args()
+	var uargs := OS.get_cmdline_user_args()
+	var bi := uargs.find("--balance")
+	if bi >= 0:
+		# --balance [runs] [vigil]: the balance bot plays real runs at 4x speed
+		var n := int(uargs[bi + 1]) if uargs.size() > bi + 1 else 8
+		bot = BalanceBot.new(self, maxi(1, n))
+		if uargs.size() > bi + 2:
+			vigil = clampi(int(uargs[bi + 2]), 0, RunData.VIGILS.size() - 1)
+		Engine.time_scale = 4.0
+		print("balance: %d runs on Vigil %d" % [bot.runs, vigil])
 	if smoke:
 		depth_time = 2.0
 		print("smoke test: start")
@@ -578,6 +589,8 @@ func _log_run() -> void:
 	f.seek_end()
 	f.store_line(JSON.stringify(rec))
 	f.close()
+	if bot != null:
+		bot.on_run_end(rec)
 	if smoke:
 		print("smoke test: run logged, won %s, depth %d" % [won, depth])
 
@@ -903,6 +916,8 @@ func _step_pickups(dt: float) -> void:
 func _physics_process(dt: float) -> void:
 	if smoke:
 		_smoke(dt)
+	if bot != null:
+		bot.step(dt)
 	if not opt_hitstop:
 		hitstop = 0.0
 	if hitstop > 0:
