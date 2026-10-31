@@ -30,6 +30,16 @@ Open the folder in **Godot 4.3** (or newer 4.x) and press F5. The whole scene is
 - `src/fx.gd` holds grey-box particles, rings and the double-jump wing burst.
 - `src/debug_overlay.gd` shows the player state, timers and FPS.
 
+## The run
+
+- **Weapon draw:** each run starts with a pick of 1 of 2 weapons (katana, greatsword, spear, twin daggers). The chain sickle unlocks once you have banked 400 wax in total.
+- **Wax:** enemies drop wax that flies to you. It's your run currency and your XP.
+- **Rune drafts:** every level-up, pick 1 of 3 runes. Runes change your moves (Updraft, Ember Dash, Heavy Shadow, Finisher and more), and two are cursed.
+- **Shade merchant:** opens after each boss. Mend, Temper, or walk on.
+- **Death:** a "Lights out" summary, 40% of your wax (plus 50 per boss) is banked to `user://tenebrae.cfg`, then a new run.
+
+All weapon, rune and shop numbers live in `src/run_data.gd`.
+
 ## The Tenebrae ritual
 
 The name comes from an old church service where 15 candles on a triangular stand are put out one by one until the church is dark. The run follows it:

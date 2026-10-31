@@ -31,6 +31,22 @@ var depth := 1
 var depth_t := 0.0
 var hidden_candle := true
 var boss: Boss = null
+var frozen := false
+
+# run state
+var weapon := ""
+var runes: Array[String] = []
+var lvl := 1
+var xp := 0
+var run_wax := 0
+var temper := 0
+var bosses := 0
+var run_time := 0.0
+var pickups: Array = []
+# meta, saved between sessions
+const SAVE_PATH := "user://tenebrae.cfg"
+var bank := 0
+var earned := 0
 
 # --smoke (used by CI): a bot mashes inputs, depths fly by, and the run is forced
 # through the boss, the hidden candle and a death, then the game quits.
@@ -181,7 +197,163 @@ func start(i: int) -> void:
 	depth = 1
 	depth_t = 0.0
 	hidden_candle = true
-	hud.show_banner("DEPTH I", "FIFTEEN CANDLES · NO END", 1.8)
+	runes.clear()
+	lvl = 1
+	xp = 0
+	run_wax = 0
+	temper = 0
+	bosses = 0
+	run_time = 0.0
+	pickups.clear()
+	_load_meta()
+	_weapon_draw()
+
+
+func _weapon_draw() -> void:
+	var pool := RunData.WEAPONS.keys().filter(func(k): return not RunData.WEAPONS[k].get("locked", false) or earned >= 400)
+	pool.shuffle()
+	var opts := []
+	for k in pool.slice(0, 2):
+		var wd: Dictionary = RunData.WEAPONS[k]
+		opts.append({"id": k, "name": wd.name, "desc": wd.desc, "tag": "WEAPON", "col": Color("#f3ebe0")})
+	hud.open_choice("CHOOSE YOUR WEAPON", "A NEW DRAW EVERY RUN", opts, func(i): _pick_weapon(opts[i]))
+
+
+func _pick_weapon(o: Dictionary) -> void:
+	_equip(o.id)
+	hud.show_banner("DEPTH I", "%s · FIFTEEN CANDLES · NO END" % o.name, 1.8)
+
+
+func _equip(id: String) -> void:
+	weapon = id
+	var wd: Dictionary = RunData.WEAPONS[id]
+	player.reach = wd.reach
+	player.step_time = wd.step
+	player.damage = wd.damage
+	player.blade_len = wd.blade
+	player.slam_radius = 160.0 * wd.get("slam_mul", 1.0)
+
+
+func has_rune(r: String) -> bool:
+	return r in runes
+
+
+## Multiplier applied to every hit the player lands.
+func damage_mul() -> float:
+	var m := 1.0 + 0.15 * temper
+	if has_rune("WHETSTONE"):
+		m *= 1.25
+	if has_rune("GLASS EDGE"):
+		m *= 1.6
+	if brazier_buff():
+		m *= BRAZIER_DMG
+	return m
+
+
+func xp_need() -> int:
+	return 6 + lvl * 4
+
+
+func _open_draft() -> void:
+	var pool := RunData.RUNES.keys().filter(func(k): return not (k in runes))
+	pool.shuffle()
+	var opts := []
+	for k in pool.slice(0, 3):
+		var rd: Dictionary = RunData.RUNES[k]
+		opts.append({"id": k, "name": k, "desc": rd.desc, "tag": "%s · %s" % [rd.sig, rd.rar.to_upper()], "col": RunData.RARITY_COL[rd.rar]})
+	if opts.is_empty():
+		return
+	hud.open_choice("LEVEL %d · DRAFT A RUNE" % lvl, "RUNES CHANGE HOW YOUR MOVES WORK", opts, func(i): _take_rune(opts[i].id))
+
+
+func _take_rune(id: String) -> void:
+	runes.append(id)
+	match id:
+		"GALE STEP":
+			player.dash_cooldown *= 0.6
+		"HEAVY SHADOW":
+			player.slam_radius *= 1.6
+		"VIGIL":
+			player.max_hp += 1
+			heal(1)
+		"GLASS EDGE":
+			player.max_hp = 3
+			player.hp = minf(player.hp, 3)
+	var rd: Dictionary = RunData.RUNES[id]
+	hud.show_banner(id, String(rd.desc).to_upper(), 1.4)
+
+
+func heal(n: int) -> void:
+	if has_rune("HUNGER"):
+		return
+	player.hp = minf(player.max_hp, player.hp + n)
+
+
+func _open_shop() -> void:
+	var opts := []
+	for it in RunData.SHOP:
+		var afford: bool = run_wax >= it.cost
+		opts.append({"id": it.id, "name": it.name, "desc": it.desc, "tag": ("%d WAX" % it.cost) if it.cost > 0 else "FREE", "col": Color("#f3ebe0") if afford else Color(0.4, 0.37, 0.35), "cost": it.cost})
+	hud.open_choice("SHADE MERCHANT", "YOU HAVE %d WAX · SPEND IT OR LOSE 60%% OF IT ON DEATH" % run_wax, opts, func(i): _buy(opts[i]))
+
+
+func _buy(o: Dictionary) -> void:
+	if run_wax < o.cost:
+		hud.show_banner("NOT ENOUGH WAX", "YOU WALK ON", 1.2)
+		return
+	run_wax -= o.cost
+	if o.id == "MEND":
+		heal(2)
+	elif o.id == "TEMPER":
+		temper += 1
+
+
+func _load_meta() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(SAVE_PATH) == OK:
+		bank = cfg.get_value("meta", "bank", 0)
+		earned = cfg.get_value("meta", "earned", 0)
+
+
+func _save_meta() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("meta", "bank", bank)
+	cfg.set_value("meta", "earned", earned)
+	cfg.save(SAVE_PATH)
+
+
+func _drop_wax(at: Vector2, n: int) -> void:
+	for i in n:
+		pickups.append({"pos": at, "vel": Vector2(randf_range(-160, 160), randf_range(-520, -220)), "t": 0.0})
+
+
+func _step_pickups(dt: float) -> void:
+	var target := player.position + Vector2(0, -28)
+	for pk in pickups:
+		pk.t += dt
+		var v: Vector2 = pk.vel
+		var d: Vector2 = target - pk.pos
+		if pk.t > 0.35 and d.length() < 220:
+			v = v.lerp(d.normalized() * 900, minf(1, dt * 8))
+		else:
+			v.y += 1400 * dt
+			v.x *= maxf(0, 1 - dt * 2)
+		pk.vel = v
+		var np: Vector2 = pk.pos + v * dt
+		if world.is_solid(world.cell(np.x), world.cell(np.y)) and pk.t < 3:
+			v.y = -absf(v.y) * 0.3
+			pk.vel = v
+			np = pk.pos
+		pk.pos = np
+		if d.length() < 22:
+			pk.t = 99.0
+			run_wax += 3 if has_rune("HUNGER") else 2
+			xp += 1
+			if xp >= xp_need():
+				xp -= xp_need()
+				lvl += 1
+				_open_draft()
+	pickups = pickups.filter(func(pk): return pk.t < 20)
 	camera.position = Vector2(0, -60)
 	camera.limit_left = 0
 	camera.limit_top = 0
@@ -206,11 +378,16 @@ func _physics_process(dt: float) -> void:
 		if enemies[i].dead:
 			enemies[i].queue_free()
 			enemies.remove_at(i)
+	frozen = hud.busy()
+	if frozen:
+		return
 	if player.dead:
 		dead_t += dt
-		if dead_t > 1.6:
-			start(map_i)
+		if dead_t > 1.6 and dead_t - dt <= 1.6:
+			_end_run()
 		return
+	run_time += dt
+	_step_pickups(dt)
 	if boss == null:
 		depth_t += dt
 	if depth_t >= depth_time:
@@ -318,6 +495,10 @@ func _step_hexes(dt: float) -> void:
 
 
 func _draw_hexes() -> void:
+	for pk in pickups:
+		var a := 0.5 + 0.5 * sin(pk.t * 10)
+		hex_layer.draw_circle(pk.pos, 7, Color(0.25, 0.84, 0.77, 0.25 + 0.15 * a))
+		hex_layer.draw_colored_polygon(PackedVector2Array([pk.pos + Vector2(0, -5), pk.pos + Vector2(4, 0), pk.pos + Vector2(0, 5), pk.pos + Vector2(-4, 0)]), Color("#3fd6c4"))
 	for h in hexes:
 		hex_layer.draw_circle(h.pos, 9, Color(0.7, 0.3, 1, 0.3))
 		hex_layer.draw_circle(h.pos, 5, Color("#b44dff"))
@@ -361,7 +542,7 @@ func _spawn() -> void:
 
 
 func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
-	e.hp -= dmg * (BRAZIER_DMG if brazier_buff() else 1.0)
+	e.hp -= dmg * damage_mul()
 	e.knock(kb)
 	hitstop = maxf(hitstop, 0.05)
 	shake(0.1, 5)
@@ -371,7 +552,13 @@ func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 		kills += 1
 		fx.burst(e.position + Vector2(0, -28), 18, Color("#0a0a0d"), 260)
 		e.visible = false
+		_drop_wax(e.position + Vector2(0, -28), 26 if e == boss else (4 if e.kind == Enemy.Kind.BRUTE else 2))
+		if has_rune("BLOODLINE") and kills % 20 == 0:
+			heal(1)
+			hud.show_banner("BLOODLINE", "+1 HEART", 1.0)
 		if e == boss:
+			bosses += 1
+			get_tree().create_timer(1.6).timeout.connect(_open_shop)
 			boss = null
 			hitstop = 0.25
 			shake(0.5, 14)
@@ -382,6 +569,16 @@ func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 func on_player_dead() -> void:
 	dead_t = 0.0
 	shake(0.4, 14)
+
+
+func _end_run() -> void:
+	var kept := roundi(run_wax * 0.4) + bosses * 50
+	var before := earned
+	bank += kept
+	earned += kept
+	_save_meta()
+	var unlocked := "CHAIN SICKLE" if before < 400 and earned >= 400 else ""
+	hud.open_summary({"depth": depth, "time": run_time, "kills": kills, "bosses": bosses, "wax": run_wax, "kept": kept, "bank": bank, "unlocked": unlocked})
 
 
 func shake(t: float, mag: float) -> void:
