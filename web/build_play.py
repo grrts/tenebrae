@@ -150,3 +150,4 @@ page = head + r'''<style>
 open('tenebrae-play.html', 'w').write(page)
 print('ok', len(page))
 exec(open('build_story.py').read())
+exec(open('build_content.py').read())

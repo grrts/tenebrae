@@ -1727,6 +1727,76 @@ const STORY = (() => {
     deathPose, deathAlpha, deathDim, drawDeath, chOf };
 })();
 
+// Dungeon enemies, ported from the Godot prototype (src/enemy.gd).
+// Drowned (the Well) crouch and pounce, Forged (the Bladeworks) throw spinning
+// blades flat along the floor, Snuffers (the Throne) blink beside you and slash.
+const CONTENT = (() => {
+  const EYES = { dr: '#3fd6c4', fg: '#ff8a5c', sn: '#b44dff' };
+  // returns true when it handled the enemy this frame
+  function ai(st, e, p, dx, dy, dt, sm, hit) {
+    if (e.type === 'dr') {
+      e.act = (e.act || 0); e.cd = (e.cd ?? rnd(1, 2)) - dt;
+      if (e.act > 0) { e.act -= dt; e.vx = 0; if (e.act <= 0) { e.vx = clamp(dx * 1.6, -560, 560); e.vy = -640; e.ground = false; e.pounce = .9; } return true; }
+      if (e.cd <= 0 && Math.abs(dx) < 300 && Math.abs(dy) < 80) { e.act = .4; e.cd = rnd(2, 2.8); e.f = Math.sign(dx) || 1; return true; }
+      return false;
+    }
+    if (e.type === 'fg') {
+      e.act = (e.act || 0); e.cd = (e.cd ?? rnd(1, 2)) - dt;
+      if (e.act > 0) { e.act -= dt; e.vx = 0; if (e.act <= 0) st.proj.push({ x: e.x + e.f * 16, y: e.y - 34, vx: e.f * 520, vy: 0, life: 1.8, blade: 1 }); return true; }
+      if (e.cd <= 0 && Math.abs(dy) < 50 && Math.abs(dx) < 640) { e.f = Math.sign(dx) || 1; e.act = .45; e.cd = rnd(2.2, 3.2); return true; }
+      return false;
+    }
+    if (e.type === 'sn') {
+      e.vx = 0; e.act = (e.act || 0); e.cd = (e.cd ?? rnd(1.5, 2.5)) - dt;
+      if (e.act > 0) {
+        const before = e.act; e.act -= dt;
+        if (before > .1 && e.act <= .1) {
+          st.rings.push({ x: e.x + e.f * 45, y: e.y - 30, t: 0, kind: 'ember' });
+          const fx = (p.x - e.x) * e.f;
+          if (fx > -10 && fx < 95 && Math.abs((e.y - e.h / 2) - (p.y - 28)) < 50) hit();
+        }
+        return true;
+      }
+      if (e.cd <= 0 && p.ground && Math.hypot(dx, dy) < 700) {
+        for (const side of [-p.f, p.f]) {
+          const tx = p.x + side * 70;
+          if (!isSolid(DA, Math.floor(tx / TS), Math.floor((p.y - 20) / TS)) && isSolid(DA, Math.floor(tx / TS), Math.floor((p.y + 20) / TS))) {
+            sparks(st.P, e.x, e.y - 28, 1, 10); e.x = tx; e.y = p.y; e.vy = 0; e.f = p.x > e.x ? 1 : -1; e.act = .5; e.cd = rnd(2.6, 3.6); sparks(st.P, e.x, e.y - 28, 1, 10);
+            break;
+          }
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+  function draw(ctx, e, st, tt, look) {
+    const l = Object.assign({}, look, look.eyes === C.gold ? {} : { eyes: EYES[e.type] });
+    if (e.type === 'dr') {
+      const J = drawShambler(ctx, e.x, e.y + (e.act > 0 ? 8 : 0), .62 * e.sc, tt, e.f, l);
+      return J;
+    }
+    const J = drawShambler(ctx, e.x, e.y, (e.type === 'fg' ? .7 : .66) * e.sc, tt, e.f, l);
+    ctx.save();
+    if (e.type === 'fg') { ctx.fillStyle = 'rgba(255,138,92,.55)'; ctx.shadowColor = '#ff8a5c'; ctx.shadowBlur = 12; circ(ctx, e.x + e.f * 14, e.y - 36, e.act > 0 ? 7 : 4); }
+    else {
+      // the snuffer: a cone on a long pole, raised before the slash
+      const a = e.act > .1 ? -2.2 : e.act > 0 ? .3 : -1.2, hx = e.x + e.f * 10, hy = e.y - 40;
+      const tx = hx + Math.cos(a) * 50 * e.f, ty = hy + Math.sin(a) * 50;
+      ctx.strokeStyle = '#5a524c'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(tx, ty); ctx.stroke();
+      ctx.fillStyle = C.shade; ctx.beginPath(); ctx.arc(tx, ty, 7, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
+    return J;
+  }
+  function drawBlade(ctx, q, st) {
+    ctx.save(); ctx.strokeStyle = '#ffd2b8'; ctx.shadowColor = '#ff8a5c'; ctx.shadowBlur = 14; ctx.lineWidth = 2.5;
+    for (let i = 0; i < 3; i++) { const a = st.time * 18 + i * TAU / 3; ctx.beginPath(); ctx.moveTo(q.x, q.y); ctx.lineTo(q.x + Math.cos(a) * 10, q.y + Math.sin(a) * 10); ctx.stroke(); }
+    ctx.restore();
+  }
+  return { ai, draw, drawBlade };
+})();
+
 mount('cv-demo', DW, DH, (ctx, t, dt, r) => arenaSim(ctx, dt, r), (W, H) => {
   const st = {
     bg: stageBg(W, H, { lx: W * .5, ly: H * .45, spread: .8, spires: false, glow: [170, 52, 46], vig: .7, int: .45 }),
@@ -1814,9 +1884,9 @@ function aSpawn(st) {
   // portals near the player open first, so the fight follows you up the tower
   const d = st.depth, byD = DA.portals.map((q, i) => [Math.hypot(q[0] - st.p.x, (q[1] - st.p.y) * 1.4), i]).sort((a, b) => a[0] - b[0]);
   const pi = byD[Math.floor(Math.random() * Math.min(3, byD.length))][1], [x, y] = DA.portals[pi], q = Math.random();
-  const type = d >= 3 && q < .14 ? 'sp' : d >= 2 && q < .34 ? 'bat' : d >= 5 && q < .48 ? 'br' : 'sh';
+  const ch = Math.min(3, Math.floor((d - 1) / 4)), type = ch > 0 && q < .22 ? ['', 'dr', 'fg', 'sn'][ch] : d >= 3 && q < .34 ? 'sp' : d >= 2 && q < .52 ? 'bat' : d >= 5 && q < .64 ? 'br' : 'sh';
   const elite = d >= 3 && Math.random() < .04 + d * .025 ? ['SWIFT', 'SHIELDED', 'VOLATILE'][Math.floor(Math.random() * 3)] : null;
-  const hp = { sh: 3, bat: 1, br: 9, sp: 2 }[type] * hpMul(d) * (elite ? 2.2 : 1);
+  const hp = { sh: 3, bat: 1, br: 9, sp: 2, dr: 4, fg: 4, sn: 3 }[type] * hpMul(d) * (elite ? 2.2 : 1);
   st.pfx[pi] = .6;
   st.E.push({ type, elite, x, y: y + 22, vx: rnd(-40, 40), vy: 0, hp, mhp: hp, o: rnd(0, 20), f: 1, hit: 0, ground: false, sc: elite ? 1.18 : 1,
     w: type === 'br' ? 30 : 18, h: (type === 'br' ? 70 : 52) * (elite ? 1.18 : 1), shoot: rnd(1, 2.4), plat: null, burnT: 0 });
@@ -2037,7 +2107,8 @@ function arenaSim(ctx, rdt, r) {
       } else {
         const dx = p.x - e.x, dy = p.y - e.y;
         if (e.ground && Math.abs(e.vx) < 100) {
-          if (e.type === 'sp') { e.vx = 0; e.f = Math.sign(dx) || 1; e.shoot -= dt;
+          if (CONTENT.ai(st, e, p, dx, dy, dt, sm, () => hitPlayer(dmgN))) {}
+          else if (e.type === 'sp') { e.vx = 0; e.f = Math.sign(dx) || 1; e.shoot -= dt;
             if (e.shoot <= 0 && Math.abs(dx) < 620) { e.shoot = rnd(2, 3) / sm; const tt = .9; st.proj.push({ x: e.x + e.f * 14, y: e.y - 92, vx: dx / tt, vy: (dy - 40) / tt - .5 * 900 * tt, life: 3 }); } }
           else {
             const sp = (e.type === 'br' ? 42 : 70) * sm;
@@ -2049,11 +2120,12 @@ function arenaSim(ctx, rdt, r) {
         e.vy += GRV * dt;
         arenaMove(e, dt, e.w, e.h, false);
       }
+      if (e.pounce > 0) { e.pounce -= dt; if (p.hurt <= 0 && p.dash <= 0 && Math.abs(e.x - p.x) < 26 && Math.abs((e.y - e.h / 2) - (p.y - 28)) < 40) { e.pounce = 0; hitPlayer(dmgN); } }
       const reach = e.type === 'boss' ? 34 : 20;
       if (!p.slam && e.hit <= 0 && Math.abs(e.vx) < 200 && Math.abs(e.x - p.x) < reach && Math.abs((e.y - e.h / 2) - (p.y - 28)) < (e.type === 'boss' ? 70 : 40)) hitPlayer(e.type === 'boss' ? 1 + (st.depth >= 8 ? 1 : 0) : dmgN);
     }
     st.E = st.E.filter(e => !e.dead);
-    for (const q of st.proj) { q.vy += 900 * dt; q.x += q.vx * dt; q.y += q.vy * dt; q.life -= dt;
+    for (const q of st.proj) { if (!q.blade) q.vy += 900 * dt; q.x += q.vx * dt; q.y += q.vy * dt; q.life -= dt;
       if (Math.random() < .6) emit(st.P, { x: q.x, y: q.y, vx: rnd(-20, 20), vy: rnd(-20, 20), r: rnd(2, 3.5), col: C.violet, glow: 8, life: .3, shrink: 1, a: .8 });
       if (p.hurt <= 0 && p.dash <= 0 && Math.hypot(q.x - p.x, q.y - (p.y - 28)) < 22) { q.life = 0; hitPlayer(dmgN); }
       if (isSolid(DA, Math.floor(q.x / TS), Math.floor(q.y / TS)) || q.life <= 0) { q.life = 0; for (let i = 0; i < 8; i++) emit(st.P, { x: q.x, y: q.y, vx: rnd(-120, 120), vy: rnd(-160, -20), g: 500, r: rnd(2, 3.5), col: C.violet, glow: 8, life: .5 }); } }
@@ -2138,11 +2210,12 @@ function arenaSim(ctx, rdt, r) {
     if (e.type === 'bat') drawBat(ctx, e.x, e.y, .6 * e.sc, st.time, e.f, { off: e.o, body: e.hit > 0 ? '#ffe6d6' : C.shade });
     else if (e.type === 'sh') drawShambler(ctx, e.x, e.y, .62 * e.sc, tt, e.f, look);
     else if (e.type === 'br') drawBrute(ctx, e.x, e.y, .7 * e.sc, tt, e.f, look);
-    else drawHexer(ctx, e.x, e.y, .7 * e.sc, st.time + e.o, e.f, look);
+    else if (e.type === 'sp') drawHexer(ctx, e.x, e.y, .7 * e.sc, st.time + e.o, e.f, look);
+    else CONTENT.draw(ctx, e, st, tt, look);
     if (e.elite) { ctx.font = `600 9px ${MONO}`; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#000'; ctx.strokeText(e.elite, e.x, e.y - e.h - 16); ctx.fillStyle = C.gold; ctx.fillText(e.elite, e.x, e.y - e.h - 16);
       ctx.fillStyle = 'rgba(0,0,0,.8)'; ctx.fillRect(e.x - 17, e.y - e.h - 11, 34, 5); ctx.fillStyle = C.gold; ctx.fillRect(e.x - 16, e.y - e.h - 10, 32 * clamp(e.hp / e.mhp, 0, 1), 3); }
   }
-  for (const q of st.proj) { ctx.save(); ctx.fillStyle = C.violet; ctx.shadowColor = C.violet; ctx.shadowBlur = 16; circ(ctx, q.x, q.y, 6); ctx.restore(); }
+  for (const q of st.proj) { if (q.blade) { CONTENT.drawBlade(ctx, q, st); continue; } ctx.save(); ctx.fillStyle = C.violet; ctx.shadowColor = C.violet; ctx.shadowBlur = 16; circ(ctx, q.x, q.y, 6); ctx.restore(); }
   // echo shades
   for (const s of st.shades) { const k = s.t / .5, sw = lerp(-2.5, 1.4, easeOut(clamp(k * 3, 0, 1)));
     const J = rig({ x: s.x, y: s.y - 44, f: s.f, s: PS, lean: .3, tilt: -.1, legs: [[-.45, -1.1], [.85, -1.5]], arms: [[-.6, 1.2], [sw, .15]] });
