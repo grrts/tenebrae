@@ -245,6 +245,7 @@ func _attack_hits() -> void:
 		return
 	var box := Rect2(position.x + (0.0 if facing > 0 else -reach), position.y - 64, reach, 64)
 	game.debug_box(box, Color(1, 0.8, 0.2, 0.35))
+	game.strike_braziers(box)
 	for e in game.enemies:
 		if e.dead or atk.hit.has(e):
 			continue
@@ -264,7 +265,7 @@ func take_hit(from_x: float) -> void:
 	slam = false
 	game.shake(0.25, 12)
 	game.hitstop = 0.08
-	if hp <= 0:
+	if hp <= 0 and not game.try_revive():
 		dead = true
 		game.on_player_dead()
 

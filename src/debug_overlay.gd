@@ -24,7 +24,7 @@ func _process(_dt: float) -> void:
 	var p := game.player
 	var alive := game.enemies.filter(func(e): return not e.dead).size()
 	label.text = "\n".join([
-		"TENEBRAE PROTOTYPE   map %s (1-5)   R restart   F1 panel   F2 hitboxes" % game.world.map_name,
+		"TENEBRAE PROTOTYPE   map %s (1-5)   R restart   F1 panel   F2 hitboxes   F3 next depth" % game.world.map_name,
 		"fps %d   physics %d Hz" % [Engine.get_frames_per_second(), Engine.physics_ticks_per_second],
 		"state  %s" % p.state_name(),
 		"pos    %.0f, %.0f" % [p.position.x, p.position.y],
@@ -32,4 +32,5 @@ func _process(_dt: float) -> void:
 		"ground %s  one-way %s  wall %d" % [p.ground, p.on_one_way, p.wall],
 		"coyote %.2f  buffer %.2f  dash cd %.2f" % [p.coyote, p.buffer, p.dash_cd],
 		"hp %d/%d   kills %d   enemies %d" % [p.hp, p.max_hp, game.kills, alive],
+		"depth %d (%.0fs)   candles out %d   darkness %.2f   hidden candle %s   brazier buff %s" % [game.depth, game.depth_t, game.candles_out(), game.darkness(), game.hidden_candle, game.brazier_buff()],
 	])
