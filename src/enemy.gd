@@ -596,7 +596,8 @@ func _snuffer(dt: float) -> void:
 
 func _touch() -> void:
 	var p := game.player
-	if kind == Kind.HEXER or kind == Kind.BRUTE or kind == Kind.SNUFFER or kind == Kind.FORGED:
+	# hollows only hurt with their telegraphed lunge and vault, never by standing in you
+	if kind == Kind.HOLLOW or kind == Kind.HEXER or kind == Kind.BRUTE or kind == Kind.SNUFFER or kind == Kind.FORGED:
 		return
 	if not p.dead and stun <= 0 and hurtbox().grow(-2).intersects(p.hurtbox()):
 		p.take_hit(position.x)
