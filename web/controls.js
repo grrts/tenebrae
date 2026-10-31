@@ -1,10 +1,10 @@
 /* ---------- input: keyboard, mouse, gamepad, pause and rebinding ---------- */
 // Keys are physical codes (e.code), so WASD stays under the same fingers on AZERTY and QWERTZ.
 // Two full hands work out of the box: WASD + Space / J / K (or the mouse), and arrows + Z / X / C.
-const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'attack', 'dash'];
+const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'attack', 'dash', 'skill'];
 const DEFAULT_KEYS = {
   left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'], up: ['KeyW', 'ArrowUp'], down: ['KeyS', 'ArrowDown'],
-  jump: ['Space', 'KeyZ'], attack: ['KeyJ', 'KeyX', 'Mouse0'], dash: ['ShiftLeft', 'KeyK', 'KeyC', 'ShiftRight', 'Mouse2'],
+  jump: ['Space', 'KeyZ'], attack: ['KeyJ', 'KeyX', 'Mouse0'], dash: ['ShiftLeft', 'KeyK', 'KeyC', 'ShiftRight', 'Mouse2'], skill: ['KeyQ', 'KeyL'],
 };
 const RESERVED = ['Escape', 'Enter', 'NumpadEnter', 'Tab', 'F1', 'F5', 'F11', 'F12', 'MetaLeft', 'MetaRight'];
 const store = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } };
@@ -32,7 +32,7 @@ const keysList = a => KEYS[a].filter(c => c !== 'ShiftRight').map(keyName).join(
 function keysLine() {
   const b = s => `<b>${s}</b>`;
   return `${b(keyLabel('left') + ' ' + keyLabel('right'))} or ${b('← →')} move · ${b(keysList('jump'))}${upJumps ? ' or ' + b(keyLabel('up')) : ''} jump · ` +
-    `${b(keysList('attack'))} attack (hold to keep swinging) · ${b(keysList('dash'))} dash · ${b(keyLabel('down'))} + attack in air: slam · ` +
+    `${b(keysList('attack'))} attack (hold to keep swinging) · ${b(keysList('dash'))} dash · ${b(keysList('skill'))} weapon skill when the meter is full · ${b(keyLabel('down'))} + attack in air: slam · ` +
     `${b(keyLabel('down'))} + jump: drop · ${b('ESC')} pause and rebind · controller works too`;
 }
 
@@ -73,7 +73,7 @@ function pollInput() {
   const b = i => !!(pad && pad.buttons[i] && pad.buttons[i].pressed), ax = i => pad ? pad.axes[i] || 0 : 0;
   const now = {
     left: b(14) || ax(0) < -.4, right: b(15) || ax(0) > .4, up: b(12) || ax(1) < -.5, down: b(13) || ax(1) > .5,
-    jump: b(0), attack: b(2), dash: b(5) || b(7) || b(1) };
+    jump: b(0), attack: b(2), dash: b(5) || b(7) || b(1), skill: b(3) };
   const any = (codes, set) => codes.some(c => set.has(c));
   for (const k of ACTIONS) {
     const tap = any(KEYS[k], tapped);
@@ -101,7 +101,7 @@ function mouseSide(st, px, W) {
 /* pause menu and the controls page, drawn over the arena */
 const CTRL = (() => {
   const PAUSE = ['RESUME', 'CONTROLS', 'RESTART RUN'];
-  const ROWS = [['left', 'MOVE LEFT'], ['right', 'MOVE RIGHT'], ['up', 'UP'], ['down', 'DOWN · DROP, SLAM'], ['jump', 'JUMP'], ['attack', 'ATTACK'], ['dash', 'DASH'],
+  const ROWS = [['left', 'MOVE LEFT'], ['right', 'MOVE RIGHT'], ['up', 'UP'], ['down', 'DOWN · DROP, SLAM'], ['jump', 'JUMP'], ['attack', 'ATTACK'], ['dash', 'DASH'], ['skill', 'WEAPON SKILL'],
     ['upjump', 'UP ALSO JUMPS'], ['reset', 'RESET TO DEFAULTS'], ['back', 'BACK']];
   const api = { menu: null };
   // while a menu is up the arena sees no presses, and no held swing or dash leaks through

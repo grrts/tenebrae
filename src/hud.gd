@@ -21,6 +21,13 @@ var scene = null
 var title_screen = null
 # the Reliquary, opened from the title screen: {pick, t, msg, msg_t}
 var reliquary = null
+# the Codex screen over the title: {pick, t}
+var codex = null
+# true after the last input came from a gamepad, so prompts show pad buttons
+var pad := false
+
+const PAD_NAMES := {"jump": "A", "attack": "X", "dash": "RB", "pause": "START", "skill": "Y", "cancel": "B"}
+const KEY_NAMES := {"jump": "SPACE", "attack": "J", "dash": "SHIFT", "pause": "ESC", "skill": "L", "cancel": "ESC"}
 # achievement toasts: [{name, t}]
 var toasts: Array = []
 var hp_show := 1.0
@@ -91,6 +98,22 @@ func show_banner(text: String, sub: String, t := 1.6) -> void:
 	banner_t = t
 
 
+func _input(event: InputEvent) -> void:
+	if event is InputEventJoypadButton and event.pressed:
+		pad = true
+	elif event is InputEventJoypadMotion and absf(event.axis_value) > 0.5:
+		pad = true
+	elif event is InputEventKey or event is InputEventMouseButton:
+		pad = false
+
+
+## The on-screen name of the button for an action, for whichever device was used last.
+func btn(action: String) -> String:
+	if pad:
+		return PAD_NAMES[action]
+	return game.key_label(action) if action in game.REBINDABLE else KEY_NAMES[action]
+
+
 func _process(dt: float) -> void:
 	banner_t = maxf(0, banner_t - dt)
 	flash_t = maxf(0, flash_t - dt)
@@ -99,10 +122,14 @@ func _process(dt: float) -> void:
 	toasts = toasts.filter(func(tst): return tst.t < 4.0)
 	if title_screen != null and reliquary != null:
 		_step_reliquary(dt)
+	elif title_screen != null and codex != null:
+		_step_codex(dt)
 	elif title_screen != null:
 		title_screen.t += dt
 		if title_screen.t > 0.4 and Input.is_action_just_pressed("dash"):
 			reliquary = {"pick": 0, "t": 0.0, "msg": "", "msg_t": 0.0}
+		if title_screen.t > 0.4 and Input.is_action_just_pressed("skill"):
+			codex = {"pick": 0, "t": 0.0}
 		if Input.is_action_just_pressed("left"):
 			game.vigil = maxi(0, game.vigil - 1)
 		if Input.is_action_just_pressed("right"):
@@ -226,6 +253,8 @@ func _paint() -> void:
 		_paint_title(vp)
 		if reliquary != null:
 			_paint_reliquary(vp)
+		elif codex != null:
+			_paint_codex(vp)
 	elif scene != null:
 		_paint_scene(vp)
 	elif menu != null:
@@ -238,7 +267,7 @@ func _paint() -> void:
 		var r := Rect2(vp.x - 330, vp.y - 110 - i * 64, 310, 54)
 		canvas.draw_rect(r, Color(0.04, 0.03, 0.05, 0.9 * a))
 		canvas.draw_rect(r, Color(0.95, 0.7, 0.23, a), false, 1.5)
-		_text("ACHIEVEMENT", r.position + Vector2(14, 20), 11, Color(0.95, 0.7, 0.23, a))
+		_text(tst.get("head", "ACHIEVEMENT"), r.position + Vector2(14, 20), 11, Color(0.95, 0.7, 0.23, a))
 		_text(tst.name, r.position + Vector2(14, 42), 18, Color(0.95, 0.92, 0.88, a))
 	if flash_t > 0:
 		canvas.draw_rect(Rect2(Vector2.ZERO, vp), Color(flash_col, clampf(flash_t * 4, 0, 1) * 0.85))
@@ -260,9 +289,58 @@ func _paint_title(vp: Vector2) -> void:
 	var stats := "BANKED ASH %d   ·   DEEPEST %s   ·   DAWNS %d" % [game.bank, Game.roman(maxi(1, game.best_depth)), game.wins]
 	_text(stats + "   ·   ACHIEVEMENTS %d / %d" % [game.achieved.size(), Achievements.LIST.size()], Vector2(mid.x, vp.y - 110), 13, Color(0.6, 0.57, 0.54), true)
 	var blink := 0.5 + 0.5 * sin(t * 4)
-	_text("PRESS %s OR ENTER TO DESCEND" % game.key_label("attack"), Vector2(mid.x, vp.y - 70), 16, Color(0.95, 0.92, 0.88, 0.4 + 0.6 * blink), true)
+	_text("PRESS %s TO DESCEND" % btn("jump"), Vector2(mid.x, vp.y - 70), 16, Color(0.95, 0.92, 0.88, 0.4 + 0.6 * blink), true)
 	var open := RunData.RELICS.filter(func(r): return not r.id in game.relics).size()
-	_text("%s / RB  THE RELIQUARY  ·  %d TO BUY" % [game.key_label("dash"), open] if open > 0 else "THE RELIQUARY IS COMPLETE", Vector2(mid.x, vp.y - 44), 12, Color("#3fd6c4"), true)
+	var rq := "%s  THE RELIQUARY  ·  %d TO BUY" % [btn("dash"), open] if open > 0 else "THE RELIQUARY IS COMPLETE"
+	var cx := "%s  THE CODEX  ·  %d / %d" % [btn("skill"), game.codex.size(), Codex.ENTRIES.size()]
+	_text(rq + "      " + cx, Vector2(mid.x, vp.y - 44), 12, Color("#3fd6c4"), true)
+
+
+func _step_codex(dt: float) -> void:
+	var c: Dictionary = codex
+	c.t += dt
+	var n := Codex.ENTRIES.size()
+	if Input.is_action_just_pressed("up"):
+		c.pick = (c.pick + n - 1) % n
+	if Input.is_action_just_pressed("down"):
+		c.pick = (c.pick + 1) % n
+	if c.t > 0.25 and (Input.is_action_just_pressed("dash") or Input.is_action_just_pressed("pause") or Input.is_action_just_pressed("back") or Input.is_action_just_pressed("skill")):
+		codex = null
+
+
+func _paint_codex(vp: Vector2) -> void:
+	var c: Dictionary = codex
+	canvas.draw_rect(Rect2(Vector2.ZERO, vp), Color(0.02, 0.01, 0.02, 0.95))
+	var mid := vp / 2
+	_text("THE CODEX", Vector2(mid.x, 70), 40, Color("#f3ebe0"), true)
+	_text("%d OF %d PAGES  ·  EVERYTHING THE DARK HAS SHOWN YOU" % [game.codex.size(), Codex.ENTRIES.size()], Vector2(mid.x, 96), 13, Color("#3fd6c4"), true)
+	var cols := {Codex.LORE: Color("#f2b43a"), Codex.PLACE: Color("#3fd6c4"), Codex.FOE: Color("#e5383b"), Codex.BOSS: Color("#b44dff")}
+	var x0 := mid.x - 440
+	var rows := 14
+	var top := clampi(c.pick - rows / 2, 0, maxi(0, Codex.ENTRIES.size() - rows))
+	for j in mini(rows, Codex.ENTRIES.size()):
+		var i := top + j
+		var e: Dictionary = Codex.ENTRIES[i]
+		var y := 124.0 + j * 30
+		var known: bool = e.id in game.codex
+		if i == c.pick:
+			canvas.draw_rect(Rect2(x0, y, 300, 26), Color(0.08, 0.06, 0.09, 1))
+			canvas.draw_rect(Rect2(x0, y, 300, 26), Color("#f2b43a"), false, 2)
+		_text(e.cat, Vector2(x0 + 10, y + 17), 9, cols[e.cat])
+		_text(e.name if known else "? ? ?", Vector2(x0 + 64, y + 18), 14, Color("#f3ebe0") if known else Color(0.4, 0.37, 0.35))
+	var sel: Dictionary = Codex.ENTRIES[c.pick]
+	var bx := x0 + 330
+	canvas.draw_rect(Rect2(bx, 124, 550, 400), Color(0.05, 0.04, 0.06, 1))
+	if sel.id in game.codex:
+		_text(sel.name, Vector2(bx + 24, 164), 24, cols[sel.cat])
+		var y2 := 200.0
+		for line in _wrap(sel.text, 500, 16):
+			_text(line, Vector2(bx + 24, y2), 16, Color(0.85, 0.8, 0.76))
+			y2 += 24
+	else:
+		_text("This page is still dark.", Vector2(bx + 24, 164), 18, Color(0.5, 0.46, 0.43))
+		_text("Keep descending.", Vector2(bx + 24, 192), 14, Color(0.4, 0.37, 0.35))
+	_text("UP / DOWN  CHOOSE      %s  BACK" % btn("dash"), Vector2(mid.x, vp.y - 30), 12, Color(0.55, 0.5, 0.47), true)
 
 
 func _step_reliquary(dt: float) -> void:
@@ -311,7 +389,7 @@ func _paint_reliquary(vp: Vector2) -> void:
 		_text("OWNED" if owned else "%d ASH" % rel.cost, Vector2(x0 + 650, y + 26), 13, Color("#3fd6c4") if owned else (Color("#f2b43a") if can else Color(0.5, 0.45, 0.4)))
 	if r.msg_t > 0:
 		_text(r.msg, Vector2(mid.x, vp.y - 70), 20, Color("#f2b43a"), true)
-	_text("UP / DOWN  CHOOSE      %s / ENTER  BUY      %s / ESC  BACK" % [game.key_label("attack"), game.key_label("dash")], Vector2(mid.x, vp.y - 30), 12, Color(0.55, 0.5, 0.47), true)
+	_text("UP / DOWN  CHOOSE      %s  BUY      %s  BACK" % [btn("jump"), btn("dash")], Vector2(mid.x, vp.y - 30), 12, Color(0.55, 0.5, 0.47), true)
 
 
 ## Souls-like death: a black band fades in and EXTINGUISHED slowly grows in it.
@@ -376,7 +454,7 @@ func _paint_scene(vp: Vector2) -> void:
 		var lines := _wrap(String(c.text), minf(760, vp.x - 80), 22)
 		for i in lines.size():
 			_text(lines[i], Vector2(mid.x, y + i * 32), 22, Color(0.92, 0.88, 0.84, a), true)
-	_text("%s / ENTER  NEXT      ESC  SKIP" % game.key_label("attack"), Vector2(vp.x - 130, vp.y - 30), 11, Color(0.55, 0.5, 0.47), true)
+	_text("%s  NEXT      %s  SKIP" % [btn("jump"), btn("cancel")], Vector2(vp.x - 130, vp.y - 30), 11, Color(0.55, 0.5, 0.47), true)
 
 
 func _paint_menu(vp: Vector2) -> void:
@@ -384,7 +462,9 @@ func _paint_menu(vp: Vector2) -> void:
 	_text(menu.title, Vector2(vp.x / 2, 110), 40, Color("#f3ebe0"), true)
 	_text(menu.sub, Vector2(vp.x / 2, 140), 14, Color(0.6, 0.57, 0.54), true)
 	var n: int = menu.opts.size()
-	var foot := ("WAITING FOR A KEY  ·  ESC CANCELS" if menu.get("locked", false) else "ARROWS  CHOOSE      %s / ENTER / 1-%d  CONFIRM%s" % [game.key_label("attack"), mini(9, menu.opts.size()), "      ESC  BACK" if menu.cancel.is_valid() else ""])
+	var foot := ("WAITING FOR A KEY  ·  ESC CANCELS" if menu.get("locked", false) else
+		("D-PAD  CHOOSE      A  CONFIRM%s" % ("      B  BACK" if menu.cancel.is_valid() else "")) if pad else
+		"ARROWS  CHOOSE      %s / ENTER / 1-%d  CONFIRM%s" % [game.key_label("attack"), mini(9, menu.opts.size()), "      ESC  BACK" if menu.cancel.is_valid() else ""])
 	if n > 7:
 		# long menus (Controls) are a list: name on the left, value on the right, the picked row's note under the title
 		_text(String(menu.opts[menu.pick].desc), Vector2(vp.x / 2, 166), 14, Color(0.85, 0.8, 0.75), true)
@@ -442,7 +522,7 @@ func _paint_summary(vp: Vector2) -> void:
 	if s.unlocked != "":
 		_text("UNLOCKED · %s" % s.unlocked, Vector2(vp.x / 2, 380), 30, Color("#f2b43a"), true)
 	if s.t > 1.2:
-		_text("PRESS %s OR ENTER TO RELIGHT THE CANDLES" % game.key_label("attack"), Vector2(vp.x / 2, vp.y - 60), 14, Color(0.6, 0.57, 0.54), true)
+		_text("PRESS %s TO RELIGHT THE CANDLES" % btn("jump"), Vector2(vp.x / 2, vp.y - 60), 14, Color(0.6, 0.57, 0.54), true)
 
 
 func _hearse(o: Vector2) -> void:

@@ -76,6 +76,8 @@ def _controls_build():
     rep("ctx.fillText('J / CLICK  NEXT     ESC  SKIP', W - 16, 22)", "ctx.fillText(`${keyLabel('attack')} / CLICK  NEXT     ESC  SKIP`, W - 16, 22)")
     rep("[['DASH', 'SHIFT', Math.max(0, p.dashCd) / .6], ['SLAM', 'S+J', 0], ['WALL', 'SPACE', 0]]",
         "[['DASH', keyLabel('dash'), Math.max(0, p.dashCd) / .6], ['SLAM', keyLabel('down') + '+' + keyLabel('attack'), 0], ['WALL', keyLabel('jump'), 0]]")
+    rep("sub: 'PRESS Q OR Y', t: 1, col: C.gold }", "sub: `PRESS ${keyLabel('skill')} OR Y`, t: 1, col: C.gold }")
+    rep("SKILL_NAMES[st.weapon] + '  ·  Q'", "SKILL_NAMES[st.weapon] + '  ·  ' + keyLabel('skill')")
     s = page.index('<div class="keys">')
     e = page.index('</div>', s) + 6
     page = page[:s] + '<div class="keys" id="keys"></div>' + page[e:]

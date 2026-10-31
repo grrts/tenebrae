@@ -17,4 +17,5 @@ const LIST := [
 	{"id": "LAMPLIGHTER", "name": "Lamplighter", "desc": "Relight 10 braziers in one run."},
 	{"id": "RELIQUARY", "name": "Keeper of Relics", "desc": "Buy everything in the Reliquary."},
 	{"id": "ELITE_HUNTER", "name": "Gold in the Ash", "desc": "Defeat 25 elite enemies."},
+	{"id": "CODEX", "name": "Every Story Told", "desc": "Fill every page of the Codex."},
 ]
