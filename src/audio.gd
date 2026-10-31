@@ -12,7 +12,7 @@ extends Node
 ##   audio/vo/<md5 of the line>.ogg          a gibberish voice for each spoken line in story.gd
 
 const POOL := 24
-const MUSIC_DB := -9.0
+const MUSIC_DB := -21.0
 
 var pool: Array[AudioStreamPlayer] = []
 var next_p := 0
@@ -28,6 +28,9 @@ var music_bus := -1
 var lowpass: AudioEffectLowPassFilter
 var voice: AudioStreamPlayer
 var inten := 0.0
+# the score dips under heavy impacts so they land
+var duck_db := 0.0
+const DUCK := {"hit_crit": -6.0, "hurt": -10.0, "slam": -10.0, "slam_heavy": -12.0, "big": -14.0, "roar": -10.0, "boss_death": -18.0, "flash_red": -10.0, "flash_white": -10.0, "die0": -14.0}
 
 var game: Node = null
 var P := {}
@@ -98,6 +101,8 @@ func play(sound: String, db := 0.0, pitch := 1.0, gap := 0.03) -> void:
 	p.pitch_scale = pitch
 	p.play()
 	played += 1
+	if DUCK.has(sound) or sound.begins_with("kill_"):
+		duck_db = minf(duck_db, DUCK.get(sound, -6.0))
 
 
 func say(text: String) -> void:
@@ -356,7 +361,8 @@ func _process(dt: float) -> void:
 		(layers[k] as AudioStreamPlayer).volume_db = layer_db[k]
 	var cut := 260.0 if pdead else 1100.0 if (menu != null or summary != null or title != null) else 20000.0
 	lowpass.cutoff_hz = lerpf(lowpass.cutoff_hz, cut, clampf(dt * 3, 0, 1))
-	AudioServer.set_bus_volume_db(music_bus, -10.0 if scene != null else -4.0 if pdead else 0.0)
+	duck_db = move_toward(duck_db, 0.0, dt * 14.0)
+	AudioServer.set_bus_volume_db(music_bus, (-6.0 if scene != null else -4.0 if pdead else 0.0) + duck_db)
 
 	var atk2 = _g(pl, "atk")
 	P = {"title": title, "menu": menu, "pick": menu.pick if menu != null else -1, "summary": summary,

@@ -1808,7 +1808,7 @@ const AUDIO = (() => {
   const ls = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } };
   const cl = (v, a, b) => Math.max(a, Math.min(b, v)), mix = (a, b, k) => a + (b - a) * k, R = (a, b) => a + Math.random() * (b - a);
   const mf = m => 440 * Math.pow(2, (m - 69) / 12);
-  let ac = null, out, comp, revIn, sfxB, musB, musF, ambB, voxB, noiseBuf, muted = ls('tenebrae.mute') === '1' || q.has('mute');
+  let ac = null, out, comp, revIn, sfxB, musB, musF, ambB, voxB, driveB, duckG, noiseBuf, muted = ls('tenebrae.mute') === '1' || q.has('mute');
   const log = [], logE = n => { log.push(n); if (log.length > 400) log.shift(); };
   let toast = 0;
 
@@ -1833,19 +1833,24 @@ const AUDIO = (() => {
     if (ac.state === 'suspended') ac.resume();
   }
   function graph() {
-    comp = ac.createDynamicsCompressor(); comp.threshold.value = -20; comp.knee.value = 8; comp.ratio.value = 10; comp.attack.value = .003; comp.release.value = .25;
-    out = ac.createGain(); out.gain.value = muted ? 0 : .7; out.connect(comp); comp.connect(ac.destination);
+    comp = ac.createDynamicsCompressor(); comp.threshold.value = -12; comp.knee.value = 6; comp.ratio.value = 4; comp.attack.value = .012; comp.release.value = .18;
+    const clip = ac.createWaveShaper(), cv = new Float32Array(2048); for (let i = 0; i < 2048; i++) { const x = i / 1023.5 - 1; cv[i] = Math.tanh(x * 1.6) / Math.tanh(1.6); }
+    clip.curve = cv; clip.oversample = '4x';
+    out = ac.createGain(); out.gain.value = muted ? 0 : .75; out.connect(comp); comp.connect(clip); clip.connect(ac.destination);
     const rev = ac.createConvolver(); rev.buffer = impulse(4.6, 2.4); revIn = ac.createGain(); revIn.connect(rev);
     const rg = ac.createGain(); rg.gain.value = .6; rev.connect(rg); rg.connect(out);
     const nb = ac.sampleRate * 3; noiseBuf = ac.createBuffer(1, nb, ac.sampleRate); const nd = noiseBuf.getChannelData(0); for (let i = 0; i < nb; i++) nd[i] = Math.random() * 2 - 1;
-    sfxB = bus(.9, .2); ambB = bus(.55, .45); voxB = bus(.95, .28);
+    sfxB = bus(1.35, .13); ambB = bus(.4, .4); voxB = bus(1, .26);
+    // drive: saturated layers for crunch and weight
+    const ws = ac.createWaveShaper(), dc = new Float32Array(2048); for (let i = 0; i < 2048; i++) { const x = i / 1023.5 - 1; dc[i] = Math.tanh(x * 5); }
+    ws.curve = dc; ws.oversample = '2x'; driveB = ac.createGain(); driveB.connect(ws); const dg = ac.createGain(); dg.gain.value = .55; ws.connect(dg); dg.connect(sfxB);
     musF = ac.createBiquadFilter(); musF.type = 'lowpass'; musF.frequency.value = 16000; musF.Q.value = .5;
-    musB = ac.createGain(); musB.gain.value = 0; musB.connect(musF); musF.connect(out);
-    const ms = ac.createGain(); ms.gain.value = .55; musF.connect(ms); ms.connect(revIn);
+    musB = ac.createGain(); musB.gain.value = 0; duckG = ac.createGain(); musB.connect(musF); musF.connect(duckG); duckG.connect(out);
+    const ms = ac.createGain(); ms.gain.value = .3; duckG.connect(ms); ms.connect(revIn);
   }
   addEventListener('keydown', e => {
     init();
-    if (e.code === 'KeyM' && !e.repeat) { muted = !muted; ls('tenebrae.mute', muted ? '1' : '0'); toast = 1.6; if (ac) out.gain.setTargetAtTime(muted ? 0 : .7, ac.currentTime, .05); }
+    if (e.code === 'KeyM' && !e.repeat) { muted = !muted; ls('tenebrae.mute', muted ? '1' : '0'); toast = 1.6; if (ac) out.gain.setTargetAtTime(muted ? 0 : .75, ac.currentTime, .05); }
   }, true);
   addEventListener('pointerdown', init, true);
   addEventListener('touchstart', init, true);
@@ -1900,20 +1905,34 @@ const AUDIO = (() => {
   const at = (x, y, g = 1) => { const dx = (x ?? camX) - camX, dy = (y ?? camY) - camY, d = Math.hypot(dx, dy); return { pan: cl(dx / 520, -.85, .85), v: g * cl(1.15 - d / 900, .3, 1) }; };
 
   /* ---------- the sound effects ---------- */
+  // a kick: the pitch falls from 4x to f0 in a few ms, then a body decay; drive saturates it for weight
+  function punch(t, f0, d, g, o = {}) {
+    const s = ac.createOscillator(); s.type = 'sine'; s.frequency.setValueAtTime(f0 * (o.k ?? 4), t); s.frequency.exponentialRampToValueAtTime(f0, t + (o.drop ?? .04));
+    voice(s, t, d, { g, a: .002, pan: o.pan, bus: o.drive ? driveB : o.bus });
+    noise(t, .012, { ft: 'highpass', ff: o.click ?? 2500, g: g * .5, a: .001, pan: o.pan });
+  }
+  function crunch(t, d, g, o = {}) { noise(t, d, { ft: 'bandpass', ff: o.ff ?? 1200, ff2: o.ff2 ?? 300, q: .8, g, a: .002, pan: o.pan, bus: driveB }); }
+  function duck(depth, rel) { if (!duckG) return; const t = now(); duckG.gain.cancelScheduledValues(t); duckG.gain.setTargetAtTime(depth, t, .01); duckG.gain.setTargetAtTime(1, t + .08, rel); }
   const SWING = { katana: [3200, 900, .16, .22], spear: [2600, 1500, .12, .2], greatsword: [1500, 280, .3, .32], daggers: [4400, 1900, .09, .16], sickle: [2700, 700, .18, .22] };
   const S = {
     swing(w, step) { const [a, b, d, g] = SWING[w] || SWING.katana, t = now(), big = step === 2;
-      noise(t, d * (big ? 1.5 : 1), { ft: 'bandpass', ff: a * (big ? .8 : 1), ff2: b, q: 1.4, g: g * (big ? 1.3 : 1), a: .02 });
+      noise(t, d * (big ? 1.5 : 1), { ft: 'bandpass', ff: a * (big ? .8 : 1), ff2: b, q: 1.4, g: g * (big ? 2.2 : 1.7), a: .015 });
+      noise(t, d * .7, { ft: 'highpass', ff: 5000, g: g * .4, a: .01 });
+      tone('sine', big ? 220 : 300, t, d, { f2: 90, g: big ? .16 : .08 });
       if (w === 'greatsword') tone('sine', 120, t, .3, { f2: 55, g: .12 });
       if (w === 'sickle') for (let i = 0; i < 4; i++) metal(R(1800, 2600), t + i * .035, .08, .02);
       if (big && (w === 'katana' || w === 'spear')) metal(R(1150, 1300), t + .03, .5, .025); },
-    hit(crit, x, y, big) { const t = now(), p = at(x, y);
-      tone('sine', big ? 120 : 170, t, .14, { f2: 48, g: .32, ...p });
-      noise(t, .07, { ft: 'bandpass', ff: R(1400, 2200), q: .9, g: .26, ...p });
-      noise(t, .12, { ft: 'lowpass', ff: 900, g: .2, ...p });
-      if (crit) { metal(R(900, 1200), t, .28, .05, p); noise(t, .05, { ft: 'highpass', ff: 3500, g: .14, ...p }); } },
+    hit(crit, x, y, big) { const t = now(), p = at(x, y), k = big ? .6 : 1;
+      punch(t, crit ? 55 : 70, crit ? .32 : .22, (crit ? .9 : .65) * k * p.v, { pan: p.pan, drive: 1 });
+      crunch(t, crit ? .16 : .1, (crit ? .5 : .35) * k * p.v, { ff: R(1600, 2400), ff2: 500, pan: p.pan });
+      noise(t, .05, { ft: 'bandpass', ff: R(2400, 3600), q: 1.2, g: .3 * k, ...p });
+      noise(t, .14, { ft: 'lowpass', ff: 700, g: .3 * k, ...p });
+      if (crit) { metal(R(900, 1200), t, .5, .09, p); noise(t, .07, { ft: 'highpass', ff: 3500, g: .3, ...p }); punch(t + .02, 38, .45, .5, { k: 2, drive: 1 }); duck(.55, .15); } },
     kill(type, x, y, elite) { const t = now(), p = at(x, y);
-      noise(t, .28, { ft: 'bandpass', ff: 900, ff2: 260, q: 1.2, g: .22, ...p });
+      punch(t, 48, .45, .85 * p.v, { pan: p.pan, drive: 1, k: 5 }); crunch(t, .3, .55 * p.v, { ff: 2200, ff2: 250, pan: p.pan });
+      for (let i = 0; i < 5; i++) noise(t + .03 + i * R(.02, .04), .03, { ft: 'bandpass', ff: R(700, 1600), q: 2, g: .2, ...p }); // the body breaking up
+      duck(.6, .2);
+      noise(t, .28, { ft: 'bandpass', ff: 900, ff2: 260, q: 1.2, g: .3, ...p });
       noise(t + .05, .8, { ft: 'bandpass', ff: 700, ff2: 180, q: 7, g: .09, a: .08, ...p }); // the shade leaving the body
       tone('sine', 95, t, .25, { f2: 40, g: .22, ...p });
       if (type === 'bat') tone('square', 2300, t, .14, { f2: 1100, g: .025, ft: 'lowpass', ff: 3000, ...p });
@@ -1923,7 +1942,8 @@ const AUDIO = (() => {
       if (type === 'fg') for (let i = 0; i < 4; i++) metal(R(500, 1400), t + i * .06, .25, .03, p);
       if (type === 'sn') { noise(t, .9, { ft: 'highpass', ff: 3500, g: .03, a: .05, ...p }); tone('sine', 900, t, .5, { f2: 300, g: .03, ...p }); }
       if (elite) bell(mf(74), t + .05, 1.4, .05, p); },
-    hurt() { const t = now();
+    hurt() { const t = now(); duck(.3, .35);
+      punch(t, 45, .5, 1, { drive: 1, k: 6, drop: .06 }); crunch(t, .25, .6, { ff: 900, ff2: 150 }); noise(t, .3, { ft: 'highpass', ff: 3000, ff2: 8000, g: .12 });
       tone('sine', 220, t, .25, { f2: 55, g: .5 }); noise(t, .14, { ft: 'lowpass', ff: 1600, g: .35 });
       tone('square', 98, t, .45, { g: .07, ft: 'lowpass', ff: 900 }); tone('square', 104, t, .45, { g: .07, ft: 'lowpass', ff: 900 });
       tone('sine', 52, t + .22, .16, { g: .3 }); tone('sine', 52, t + .42, .16, { g: .22 }); },
@@ -1934,11 +1954,12 @@ const AUDIO = (() => {
       tone('triangle', 880, t, .35, { f2: 1320, g: .025 }); tone('sine', 1760, t + .03, .3, { g: .012 }); },
     wall() { const t = now(); noise(t, .05, { ft: 'highpass', ff: 2600, g: .1 }); tone('sine', 140, t, .06, { g: .1 }); S.jump(); },
     drop() { const t = now(); noise(t, .1, { ft: 'bandpass', ff: 500, q: 2, g: .06 }); },
-    land(v) { const t = now(); noise(t, .13, { ft: 'lowpass', ff: 420, g: .07 + .2 * v }); tone('sine', 95, t, .1, { f2: 48, g: .16 * v }); },
+    land(v) { const t = now(); noise(t, .13, { ft: 'lowpass', ff: 420, g: .1 + .3 * v }); punch(t, 55, .18, .35 * v, { k: 2.5 }); },
     step() { const t = now(); noise(t, .03, { ft: 'bandpass', ff: R(1200, 2000), q: 2, g: .028 }); tone('sine', R(110, 135), t, .04, { g: .03 }); },
-    dash() { const t = now(); noise(t, .2, { ft: 'bandpass', ff: 600, ff2: 3600, q: 1.5, g: .2, a: .01 }); noise(t + .08, .25, { ft: 'highpass', ff: 3000, g: .03 }); tone('sine', 150, t, .12, { f2: 70, g: .1 }); },
+    dash() { const t = now(); noise(t, .22, { ft: 'bandpass', ff: 500, ff2: 4200, q: 1.3, g: .35, a: .008 }); punch(t, 80, .15, .3, { k: 2 }); noise(t + .08, .25, { ft: 'highpass', ff: 3000, g: .03 }); tone('sine', 150, t, .12, { f2: 70, g: .1 }); },
     slamStart() { const t = now(); tone('sine', 900, t, .22, { f2: 220, g: .05 }); noise(t, .22, { ft: 'bandpass', ff: 2200, ff2: 700, q: 2, g: .07 }); },
-    slam(heavy) { const t = now();
+    slam(heavy) { const t = now(); duck(.25, .5);
+      punch(t, heavy ? 34 : 42, heavy ? 1 : .7, 1.1, { drive: 1, k: 6, drop: .07 }); crunch(t, .4, .8, { ff: 1800, ff2: 120 });
       tone('sine', 115, t, .55, { f2: 32, g: .6 }); noise(t, .5, { ft: 'lowpass', ff: 1300, ff2: 180, g: .4 }); noise(t, .08, { ft: 'highpass', ff: 2200, g: .2 });
       for (let i = 0; i < 9; i++) noise(t + R(.05, .45), .025, { ft: 'bandpass', ff: R(1500, 4000), q: 3, g: .05, pan: R(-.6, .6) });
       if (heavy) tone('square', 55, t, .9, { g: .1, ft: 'lowpass', ff: 220 }); },
@@ -1957,17 +1978,20 @@ const AUDIO = (() => {
       else if (type === 'br') tone('sawtooth', 58, t, .85, { f2: 46, g: .07, a: .12, ft: 'lowpass', ff: 320, ...p });
       else tone('sawtooth', 95, t, .65, { f2: 72, g: .04, a: .12, ft: 'bandpass', ff: 520, q: 4, ...p });
       if (elite) bell(mf(62), t, 1.5, .04, p); },
-    roar(x, y) { const t = now(), p = at(x, y);
+    roar(x, y) { const t = now(), p = at(x, y); duck(.3, 1.2);
+      for (const f of [55, 82]) tone('sawtooth', f, t, 2, { f2: f * .75, g: .14, a: .2, bus: driveB, ft: 'lowpass', ff: 700 });
       for (const f of [62, 66, 93]) tone('sawtooth', f, t, 1.9, { f2: f * .8, g: .1, a: .25, ft: 'lowpass', ff: 300, ff2: 900, fg: .7, ...p });
       noise(t, 1.7, { ft: 'bandpass', ff: 480, ff2: 260, q: 2, g: .12, a: .25, ...p }); tone('sine', 40, t, 2.2, { g: .3, a: .3 }); },
-    big(x, y) { const t = now(), p = at(x, y);
+    big(x, y) { const t = now(), p = at(x, y); duck(.2, .7);
+      punch(t, 30, 1.3, 1.2, { drive: 1, k: 7, drop: .08 }); crunch(t, .6, .9, { ff: 2400, ff2: 90 });
       tone('sine', 90, t, 1.1, { f2: 28, g: .7 }); noise(t, .9, { ft: 'lowpass', ff: 1600, ff2: 120, g: .45, ...p }); noise(t, .1, { ft: 'highpass', ff: 1800, g: .22, ...p });
       for (let i = 0; i < 12; i++) noise(t + R(.08, .7), .03, { ft: 'bandpass', ff: R(900, 3500), q: 3, g: .05, pan: R(-.8, .8) }); },
     wind(x, y) { const t = now(), p = at(x, y);
       for (let i = 0; i < 11; i++) metal(R(1700, 3200), t + R(0, .6), .1, .025, p);
       tone('sawtooth', 52, t, .8, { f2: 64, g: .09, a: .55, ft: 'lowpass', ff: 260, ...p }); },
-    quake() { const t = now(); noise(t, 1.1, { ft: 'lowpass', ff: 140, g: .45, a: .05 }); tone('sine', 36, t, 1, { g: .25 }); },
-    bossDeath(x, y) { const t = now(), p = at(x, y);
+    quake() { const t = now(); noise(t, 1.1, { ft: 'lowpass', ff: 140, g: .7, a: .05 }); noise(t, .9, { ft: 'lowpass', ff: 400, g: .25, bus: driveB }); tone('sine', 36, t, 1, { g: .25 }); },
+    bossDeath(x, y) { const t = now(), p = at(x, y); duck(.1, 2.5);
+      punch(t, 26, 3, 1.3, { drive: 1, k: 8, drop: .12 }); crunch(t, 1.4, 1, { ff: 3000, ff2: 60 });
       tone('sine', 62, t, 2.8, { f2: 24, g: .75 }); noise(t, 2.6, { ft: 'lowpass', ff: 2200, ff2: 90, g: .5, ...p });
       for (let i = 0; i < 18; i++) tone('sine', R(1800, 5200), t + .1 + R(0, .5), R(.2, .6), { g: .012, pan: R(-.9, .9) });
       bell(mf(38), t + .2, 6, .12); choir([50, 57, 62, 66], t + .7, 4.5, .045, { a: 1.2 }); },
@@ -1998,13 +2022,13 @@ const AUDIO = (() => {
     over(victory) { const t = now(); if (victory) { choir([62, 66, 69, 74, 78], t, 6, .07, { a: 1.5 }); [74, 78, 81, 86].forEach((m, i) => bell(mf(m), t + .4 + i * .3, 3, .05)); }
       else bell(mf(38), t, 6, .16); },
     // death: the stagger, the blade biting stone as the Wick kneels, the crumble to ash, EXTINGUISHED
-    die0() { const t = now(); S.hurt(); noise(t, 1.3, { ft: 'lowpass', ff: 3200, ff2: 160, g: .2, a: .02 }); tone('sine', 55, t + .5, .2, { g: .35 }); tone('sine', 55, t + .75, .2, { g: .25 }); },
+    die0() { const t = now(); S.hurt(); punch(t, 28, 1.6, 1.1, { drive: 1, k: 8, drop: .1 }); noise(t, 1.3, { ft: 'lowpass', ff: 3200, ff2: 160, g: .2, a: .02 }); tone('sine', 55, t + .5, .2, { g: .35 }); tone('sine', 55, t + .75, .2, { g: .25 }); },
     die1() { const t = now(); metal(R(620, 700), t, .9, .05); noise(t, .15, { ft: 'lowpass', ff: 500, g: .25 }); tone('sine', 80, t, .2, { f2: 45, g: .25 }); },
     die2() { const t = now(); for (let i = 0; i < 40; i++) noise(t + R(0, 1.3), .02, { ft: 'bandpass', ff: R(2000, 6000), q: 4, g: .03, pan: R(-.4, .4) }); noise(t, 1.8, { ft: 'bandpass', ff: 800, q: 1.2, g: .05, a: .6 }); },
-    die3() { const t = now(); tone('sine', 41, t, 3, { g: .5 }); bell(mf(26), t, 9, .22); choir([38, 45, 50, 53], t + .2, 5.5, .05, { a: 1.2, vow: 'o' }); },
+    die3() { const t = now(); punch(t, 30, 3, 1, { drive: 1, k: 3, drop: .3 }); tone('sine', 41, t, 3, { g: .5 }); bell(mf(26), t, 9, .22); choir([38, 45, 50, 53], t + .2, 5.5, .05, { a: 1.2, vow: 'o' }); },
     // cutscenes
     shot() { const t = now(); noise(t, .25, { ft: 'bandpass', ff: 500, ff2: 1500, q: .8, g: .03, a: .08 }); },
-    flash(red) { const t = now();
+    flash(red) { const t = now(); duck(.3, .6); punch(t, red ? 30 : 40, 1.1, 1, { drive: 1, k: 6 });
       if (red) { tone('sine', 70, t, 1.2, { f2: 26, g: .6 }); noise(t, .7, { ft: 'lowpass', ff: 900, ff2: 120, g: .4 }); tone('sawtooth', 48, t, .9, { g: .08, ft: 'lowpass', ff: 300 }); }
       else { noise(t, .12, { ft: 'highpass', ff: 2600, g: .32 }); tone('sine', 1200, t, .9, { f2: 600, g: .03 }); tone('sine', 60, t, .8, { f2: 30, g: .45 }); }
       noise(t, .6, { ft: 'highpass', ff: 6000, g: .02, a: .02 }); },
@@ -2172,7 +2196,7 @@ const AUDIO = (() => {
   }
   function mixTo(t) {
     const k = M.k, mode = M.mode;
-    const mg = muted ? 0 : mode === 'death' ? .12 : mode === 'cut' ? .42 : mode === 'menu' ? .5 : .55;
+    const mg = muted ? 0 : mode === 'death' ? .05 : mode === 'cut' ? .15 : mode === 'menu' ? .14 : .19;
     musB.gain.setTargetAtTime(mg, t, mode === 'death' ? 1.2 : .6);
     musF.frequency.setTargetAtTime(mode === 'death' ? 240 : mode === 'menu' ? 1100 : 16000, t, mode === 'death' ? .9 : .25);
     drone.g.gain.setTargetAtTime(mix(.24, .38, k) * (M.boss ? 1.2 : 1), t, 1.5);
@@ -2296,11 +2320,11 @@ const AUDIO = (() => {
     ctx.fillText(msg, W - 16, H - 14); ctx.restore();
   }
   async function render(dur, fn, sr = 44100) {
-    const keep = { ac, out, comp, revIn, sfxB, musB, musF, ambB, voxB, noiseBuf, drone, pad, amb, muted, line, M: { ...M } };
+    const keep = { ac, out, comp, revIn, sfxB, musB, musF, ambB, voxB, driveB, duckG, noiseBuf, drone, pad, amb, muted, line, M: { ...M } };
     const oc = new OfflineAudioContext(2, Math.ceil(dur * sr), sr);
     ac = oc; muted = false; line = null; graph(); musB.gain.value = 1;
     try { fn(); } finally {
-      ({ ac, out, comp, revIn, sfxB, musB, musF, ambB, voxB, noiseBuf, drone, pad, amb, muted, line } = keep); Object.assign(M, keep.M);
+      ({ ac, out, comp, revIn, sfxB, musB, musF, ambB, voxB, driveB, duckG, noiseBuf, drone, pad, amb, muted, line } = keep); Object.assign(M, keep.M);
     }
     const buf = await oc.startRendering();
     return [buf.getChannelData(0), buf.getChannelData(1)];
