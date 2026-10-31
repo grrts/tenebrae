@@ -16,6 +16,7 @@ Open the folder in **Godot 4.3** (or newer 4.x) and press F5. The whole scene is
 | Katana (3-hit combo) | J or X | X |
 | Slam | Down + attack in the air | Down + X |
 | Dash (i-frames, cancels attacks) | K, Shift or C | RB or RT |
+| Weapon skill (when the meter is full) | L or Q | Y |
 | Pause | Escape or P | Start |
 | Switch arena | 1 to 5 | |
 | Restart | R | |
@@ -39,6 +40,7 @@ Open the folder in **Godot 4.3** (or newer 4.x) and press F5. The whole scene is
 
 - **Weapon draw:** each run starts with a pick of 1 of 2 weapons (katana, greatsword, spear, twin daggers). The chain sickle is bought in the Reliquary.
 - **Ash:** enemies drop ash that flies to you. It's your run currency and your XP.
+- **Weapon skills:** landing hits fills the gold meter under the HP bar; when it's full, L, Q or Y fires the weapon's skill: Iaido (katana, flash through everything ahead), Earthsplitter (greatsword), Skyward (spear, launch up), Flurry (daggers) and Reap (sickle, drag enemies in).
 - **Rune drafts:** every level-up, pick 1 of 3 runes. Runes change your moves (Updraft, Ember Dash, Heavy Shadow, Second Wind, Requiem and more), and three are cursed. Two runes with the same sigil complete a set: EDGE +15% damage, GALE faster dashes, EMBER more ash per pickup, ECHO wider slams.
 - **The Reliquary:** press Shift, K or RB on the title screen to spend banked ash on permanent unlocks: the chain sickle, four runes for the draft pool, and four starting perks (Second Draw, Ashen Skin, Spare Rune, Ember Flask). All of it lives in `RunData.RELICS`.
 - **Title screen:** shows your banked ash, deepest depth and dawns (wins), and the Vigil picker once you've won.

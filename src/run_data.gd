@@ -2,6 +2,15 @@ class_name RunData
 extends RefCounted
 ## Weapons, runes and shop items. Plain data so balance changes are one-line edits.
 
+# each weapon's skill: charged by landing hits, fired with L / Q / Y
+const SKILLS := {
+	"katana": {"name": "IAIDO", "desc": "Flash through everything ahead of you."},
+	"greatsword": {"name": "EARTHSPLITTER", "desc": "Split the floor both ways."},
+	"spear": {"name": "SKYWARD", "desc": "Launch straight up through everything above."},
+	"daggers": {"name": "FLURRY", "desc": "Eight cuts on everything close."},
+	"sickle": {"name": "REAP", "desc": "Drag every enemy nearby to you and cut."},
+}
+
 const WEAPONS := {
 	"katana": {"name": "KATANA", "desc": "Fast 3-hit combo. A dash cancels any swing.", "reach": 92.0, "step": 0.13, "damage": 1.0, "blade": 58.0},
 	"greatsword": {"name": "GREATSWORD", "desc": "Slow, huge arcs. Slams hit twice as wide.", "reach": 112.0, "step": 0.2, "damage": 1.8, "blade": 74.0, "slam_mul": 2.0},

@@ -59,6 +59,8 @@ var sets_done: Array[String] = []
 var unlocked_vigil := 0
 var achieved: Array = []
 var relics: Array = []
+var skill_meter := 0.0 ## 0..1, full = the weapon skill is ready
+var skill_hit := false ## true while a skill's own hits land, so they don't refill the meter
 var elite_kills := 0
 var run_braziers := 0
 var boss_untouched := false
@@ -208,6 +210,11 @@ func _smoke(dt: float) -> void:
 					if buy_relic(i):
 						bought += 1
 				print("smoke test: reliquary bought %d relics" % bought)
+				for w in RunData.SKILLS:
+					_equip(w)
+					skill_meter = 1.0
+					use_skill()
+				print("smoke test: all weapon skills fired")
 				hud.open_title(_smoke_title_ok)
 		3:
 			# every arena loads and runs briefly
@@ -280,6 +287,7 @@ func start(i: int, show_title := false) -> void:
 	won = false
 	runes.clear()
 	sets_done.clear()
+	skill_meter = 0.0
 	offered.clear()
 	run_braziers = 0
 	lvl = 1
@@ -426,7 +434,7 @@ func _weapon_draw() -> void:
 	var opts := []
 	for k in pool.slice(0, 3 if "second_draw" in relics else 2):
 		var wd: Dictionary = RunData.WEAPONS[k]
-		opts.append({"id": k, "name": wd.name, "desc": wd.desc, "tag": "WEAPON", "col": Color("#f3ebe0")})
+		opts.append({"id": k, "name": wd.name, "desc": "%s Skill: %s, %s" % [wd.desc, RunData.SKILLS[k].name, String(RunData.SKILLS[k].desc).to_lower()], "tag": "WEAPON", "col": Color("#f3ebe0")})
 	hud.open_choice("CHOOSE YOUR WEAPON", "A NEW DRAW EVERY RUN", opts, func(i): _pick_weapon(opts[i]))
 
 
@@ -489,6 +497,62 @@ func buy_relic(i: int) -> bool:
 	if relics.size() >= RunData.RELICS.size():
 		unlock("RELIQUARY")
 	return true
+
+
+## The weapon skill. Each weapon gets one big move; landing hits charges it.
+func use_skill() -> void:
+	skill_meter = 0.0
+	skill_hit = true
+	var p := player
+	var f := float(p.facing)
+	var base := p.damage * 3.0
+	hitstop = 0.12
+	shake(0.35, 12)
+	player.invuln = maxf(player.invuln, 0.4)
+	match weapon:
+		"katana":
+			var x0 := p.position.x
+			var x := x0
+			for i in 26:
+				var nx := x + f * 12
+				if world.is_solid(world.cell(nx + f * 12), world.cell(p.position.y - 30)):
+					break
+				x = nx
+			p.position.x = x
+			p.reset_physics_interpolation()
+			fx.burst(Vector2((x0 + x) / 2, p.position.y - 30), 30, Color("#f2b43a"), 200)
+			for e in enemies.duplicate():
+				if not e.dead and (e.position.x - x0) * f > -20 and (e.position.x - x) * f < 30 and absf(e.position.y - p.position.y) < 80:
+					hit_enemy(e, base, Vector2(f * 300, -300))
+		"greatsword":
+			fx.ring(p.position, 420, Color("#f2b43a"))
+			for e in enemies.duplicate():
+				if not e.dead and absf(e.position.x - p.position.x) < 420 and absf(e.position.y - p.position.y) < 50:
+					hit_enemy(e, base * 1.2, Vector2(signf(e.position.x - p.position.x) * 200, -700))
+		"spear":
+			p.vel.y = -1250
+			fx.burst(p.position + Vector2(0, -40), 24, Color("#f2b43a"), 260)
+			for e in enemies.duplicate():
+				if not e.dead and absf(e.position.x - p.position.x) < 60 and p.position.y - e.position.y > -40 and p.position.y - e.position.y < 380:
+					hit_enemy(e, base, Vector2(0, -800))
+		"daggers":
+			var near := enemies.filter(func(e): return not e.dead and e.position.distance_to(p.position) < 170)
+			for k in 8:
+				for e in near:
+					if not e.dead:
+						hit_enemy(e, base * 0.3, Vector2(signf(e.position.x - p.position.x) * 60, -60))
+			fx.ring(p.position + Vector2(0, -30), 170, Color("#f2b43a"))
+		"sickle":
+			for e in enemies.duplicate():
+				if not e.dead and e.position.distance_to(p.position) < 320 and e != boss:
+					e.position.x = p.position.x + signf(e.position.x - p.position.x) * 40
+					e.reset_physics_interpolation()
+					hit_enemy(e, base * 0.8, Vector2(0, -400))
+				elif e == boss and not e.dead and e.position.distance_to(p.position) < 320:
+					hit_enemy(e, base, Vector2.ZERO)
+			fx.ring(p.position + Vector2(0, -30), 320, Color("#f2b43a"))
+	skill_hit = false
+	hud.show_banner(RunData.SKILLS[weapon].name, "", 0.8)
 
 
 func on_player_hit() -> void:
@@ -689,6 +753,8 @@ func _physics_process(dt: float) -> void:
 			_end_run()
 		return
 	run_time += dt
+	if Input.is_action_just_pressed("skill") and skill_meter >= 1.0:
+		use_skill()
 	_step_pickups(dt)
 	if boss == null and not story_hold and depth < 16:
 		depth_t += dt
@@ -920,6 +986,11 @@ func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 	var guard := 0.5 if e.elite == "SHIELDED" and kb.x != 0 and signf(kb.x) == -e.facing else 1.0
 	if guard < 1:
 		fx.spark(e.position + Vector2(e.facing * 16, -30))
+	if not skill_hit and weapon != "":
+		var was_ready := skill_meter >= 1.0
+		skill_meter = minf(1.0, skill_meter + (0.05 if e == boss else 0.07))
+		if not was_ready and skill_meter >= 1.0:
+			hud.show_banner("%s READY" % RunData.SKILLS[weapon].name, "PRESS L, Q OR Y", 1.0)
 	e.hp -= dmg * damage_mul() * guard * (1.6 if e == boss and has_rune("TALLOW CROWN") else 1.0)
 	e.knock(kb)
 	hitstop = maxf(hitstop, 0.05)
@@ -1079,9 +1150,9 @@ func _unhandled_input(ev: InputEvent) -> void:
 func _setup_input() -> void:
 	var keys := {
 		"left": [KEY_A, KEY_LEFT], "right": [KEY_D, KEY_RIGHT], "down": [KEY_S, KEY_DOWN], "up": [KEY_W, KEY_UP],
-		"jump": [KEY_SPACE, KEY_Z], "attack": [KEY_J, KEY_X], "dash": [KEY_K, KEY_SHIFT, KEY_C], "pause": [KEY_ESCAPE, KEY_P],
+		"jump": [KEY_SPACE, KEY_Z], "attack": [KEY_J, KEY_X], "dash": [KEY_K, KEY_SHIFT, KEY_C], "pause": [KEY_ESCAPE, KEY_P], "skill": [KEY_L, KEY_Q],
 	}
-	var pads := {"jump": JOY_BUTTON_A, "attack": JOY_BUTTON_X, "dash": JOY_BUTTON_RIGHT_SHOULDER, "pause": JOY_BUTTON_START}
+	var pads := {"jump": JOY_BUTTON_A, "attack": JOY_BUTTON_X, "dash": JOY_BUTTON_RIGHT_SHOULDER, "pause": JOY_BUTTON_START, "skill": JOY_BUTTON_Y}
 	var axes := {"left": [JOY_AXIS_LEFT_X, -1.0], "right": [JOY_AXIS_LEFT_X, 1.0], "up": [JOY_AXIS_LEFT_Y, -1.0], "down": [JOY_AXIS_LEFT_Y, 1.0]}
 	var dpad := {"left": JOY_BUTTON_DPAD_LEFT, "right": JOY_BUTTON_DPAD_RIGHT, "up": JOY_BUTTON_DPAD_UP, "down": JOY_BUTTON_DPAD_DOWN}
 	for action in keys:

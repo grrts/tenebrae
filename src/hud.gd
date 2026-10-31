@@ -167,6 +167,13 @@ func _paint() -> void:
 	canvas.draw_rect(Rect2(bx, 22, bw * hp_show, 14), Color(0.95, 0.7, 0.23, 0.55))
 	canvas.draw_rect(Rect2(bx, 22, bw * hk, 14), Color("#e5383b"))
 	_text("%d / %d HP" % [int(p.hp) * 20, mh * 20], Vector2(bx - 104, 35), 13, Color("#f3ebe0"))
+	# weapon skill meter under the health bar
+	if game.weapon != "":
+		var full := game.skill_meter >= 1.0
+		var pulse := 0.6 + 0.4 * sin(Time.get_ticks_msec() * 0.01) if full else 1.0
+		canvas.draw_rect(Rect2(bx - 2, 42, bw + 4, 8), Color(0, 0, 0, 0.75))
+		canvas.draw_rect(Rect2(bx, 44, bw * game.skill_meter, 4), Color(0.95, 0.7, 0.23, pulse))
+		_text(("%s  ·  L" % RunData.SKILLS[game.weapon].name) if full else RunData.SKILLS[game.weapon].name, Vector2(bx, 64), 10, Color("#f2b43a") if full else Color(0.6, 0.57, 0.54))
 	# depth title
 	var title := "DEPTH %s" % Game.roman(game.depth)
 	_text(title, Vector2(vp.x / 2, 52), 34, Color("#e5383b") if game.depth >= 7 else Color("#f3ebe0"), true)
