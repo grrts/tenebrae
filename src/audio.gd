@@ -40,6 +40,7 @@ var step_ph := 0
 var card_key := ""
 var death_stage := -1
 var fall_v := 0.0
+var smoke := false
 
 
 func _ready() -> void:
@@ -133,6 +134,7 @@ func _process(dt: float) -> void:
 		return
 	if cs != game:
 		game = cs
+		smoke = bool(cs.get("smoke"))
 		P.clear()
 		hp_of.clear()
 		seen_e.clear()
@@ -371,5 +373,5 @@ func _kind(e: Node) -> String:
 
 func _exit_tree() -> void:
 	# CI reads this line to check that the sound files load and the watcher fires
-	if game != null and is_instance_valid(game) and game.get("smoke"):
+	if smoke:
 		print("smoke test: audio played %d sounds" % played)
