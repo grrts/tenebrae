@@ -1,7 +1,7 @@
 import re, sys
 src = open('tenebrae-pitch.html').read()
 head = src[:src.index('<style>')]
-head = head.replace('<title>Tenebrae Pitch Sheet</title>', '<title>Wickbearer Playtest</title>')
+head = head.replace('<title>Wickbearer Pitch Sheet</title>', '<title>Wickbearer Playtest</title>')
 script = src[src.index('<script>'):]
 lines = script.split('\n')
 
