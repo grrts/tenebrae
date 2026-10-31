@@ -18,17 +18,17 @@ var summary = null
 # a cutscene: {cards, i, t, cb}
 var scene = null
 # the title screen: {t, cb}
-var title = null
+var title_screen = null
 var flash_col := Color.WHITE
 var flash_t := 0.0
 
 
 func busy() -> bool:
-	return menu != null or summary != null or scene != null or title != null
+	return menu != null or summary != null or scene != null or title_screen != null
 
 
 func open_title(cb: Callable) -> void:
-	title = {"t": 0.0, "cb": cb}
+	title_screen = {"t": 0.0, "cb": cb}
 
 
 ## Plays Story cards one by one. Jump or attack advances, Escape skips, and each card also moves on by itself.
@@ -85,15 +85,15 @@ func show_banner(text: String, sub: String, t := 1.6) -> void:
 func _process(dt: float) -> void:
 	banner_t = maxf(0, banner_t - dt)
 	flash_t = maxf(0, flash_t - dt)
-	if title != null:
-		title.t += dt
+	if title_screen != null:
+		title_screen.t += dt
 		if Input.is_action_just_pressed("left"):
 			game.vigil = maxi(0, game.vigil - 1)
 		if Input.is_action_just_pressed("right"):
 			game.vigil = mini(game.vigil_max, game.vigil + 1)
-		if title.t > 0.4 and (Input.is_action_just_pressed("jump") or Input.is_action_just_pressed("attack")):
-			var tcb: Callable = title.cb
-			title = null
+		if title_screen.t > 0.4 and (Input.is_action_just_pressed("jump") or Input.is_action_just_pressed("attack")):
+			var tcb: Callable = title_screen.cb
+			title_screen = null
 			tcb.call()
 	elif scene != null:
 		scene.t += dt
@@ -177,7 +177,7 @@ func _paint() -> void:
 
 	if p.dead and summary == null:
 		_paint_death(vp)
-	if title != null:
+	if title_screen != null:
 		_paint_title(vp)
 	elif scene != null:
 		_paint_scene(vp)
@@ -190,7 +190,7 @@ func _paint() -> void:
 
 
 func _paint_title(vp: Vector2) -> void:
-	var t: float = title.t
+	var t: float = title_screen.t
 	canvas.draw_rect(Rect2(Vector2.ZERO, vp), Color(0.02, 0.01, 0.02, 0.96))
 	var mid := vp / 2
 	# a slow candle glow behind the name
