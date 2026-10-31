@@ -2,6 +2,15 @@ class_name RunData
 extends RefCounted
 ## Weapons, runes and shop items. Plain data so balance changes are one-line edits.
 
+# each weapon's skill: charged by landing hits, fired with L / Q / Y
+const SKILLS := {
+	"katana": {"name": "IAIDO", "desc": "Flash through everything ahead of you."},
+	"greatsword": {"name": "EARTHSPLITTER", "desc": "Split the floor both ways."},
+	"spear": {"name": "SKYWARD", "desc": "Launch straight up through everything above."},
+	"daggers": {"name": "FLURRY", "desc": "Eight cuts on everything close."},
+	"sickle": {"name": "REAP", "desc": "Drag every enemy nearby to you and cut."},
+}
+
 const WEAPONS := {
 	"katana": {"name": "KATANA", "desc": "Fast 3-hit combo. A dash cancels any swing.", "reach": 92.0, "step": 0.13, "damage": 1.0, "blade": 58.0},
 	"greatsword": {"name": "GREATSWORD", "desc": "Slow, huge arcs. Slams hit twice as wide.", "reach": 112.0, "step": 0.2, "damage": 1.8, "blade": 74.0, "slam_mul": 2.0},
@@ -22,11 +31,24 @@ const RUNES := {
 	"VIGIL": {"sig": "ECHO", "rar": "common", "desc": "+20 max HP, and restore it now."},
 	"GLASS EDGE": {"sig": "EDGE", "rar": "cursed", "desc": "Damage +60%. Max HP drops to 60."},
 	"HUNGER": {"sig": "EMBER", "rar": "cursed", "desc": "Gain 50% more ash. You can no longer heal."},
-	"SECOND WIND": {"sig": "GALE", "rar": "rare", "desc": "Every kill resets your dash."},
-	"KINDLING": {"sig": "EMBER", "rar": "common", "desc": "Braziers burn twice as long and restore 20 HP when you relight them."},
-	"REQUIEM": {"sig": "ECHO", "rar": "common", "desc": "Kills burst into shade that hits everything close by."},
-	"TALLOW CROWN": {"sig": "EDGE", "rar": "cursed", "desc": "Bosses take 60% more damage. Every other enemy has 30% more health."},
+	"SECOND WIND": {"sig": "GALE", "rar": "rare", "desc": "Every kill resets your dash.", "locked": true},
+	"KINDLING": {"sig": "EMBER", "rar": "common", "desc": "Braziers burn twice as long and restore 20 HP when you relight them.", "locked": true},
+	"REQUIEM": {"sig": "ECHO", "rar": "common", "desc": "Kills burst into shade that hits everything close by.", "locked": true},
+	"TALLOW CROWN": {"sig": "EDGE", "rar": "cursed", "desc": "Bosses take 60% more damage. Every other enemy has 30% more health.", "locked": true},
 }
+
+# The Reliquary: permanent unlocks bought with banked ash on the title screen
+const RELICS := [
+	{"id": "sickle", "kind": "WEAPON", "name": "CHAIN SICKLE", "desc": "Adds the chain sickle to the weapon draw. Its third hit hooks enemies to you.", "cost": 250},
+	{"id": "SECOND WIND", "kind": "RUNE", "name": "SECOND WIND", "desc": "Adds the rune to the draft pool: every kill resets your dash.", "cost": 120},
+	{"id": "KINDLING", "kind": "RUNE", "name": "KINDLING", "desc": "Adds the rune to the draft pool: braziers burn longer and restore HP.", "cost": 120},
+	{"id": "REQUIEM", "kind": "RUNE", "name": "REQUIEM", "desc": "Adds the rune to the draft pool: kills burst and hit nearby enemies.", "cost": 150},
+	{"id": "TALLOW CROWN", "kind": "RUNE", "name": "TALLOW CROWN", "desc": "Adds the cursed rune to the draft pool: bosses take far more damage.", "cost": 150},
+	{"id": "second_draw", "kind": "PERK", "name": "SECOND DRAW", "desc": "The weapon draw offers three weapons instead of two.", "cost": 180},
+	{"id": "ashen_skin", "kind": "PERK", "name": "ASHEN SKIN", "desc": "Start every run with 20 more max HP.", "cost": 220},
+	{"id": "spare_rune", "kind": "PERK", "name": "SPARE RUNE", "desc": "Draft one free rune at the start of every run.", "cost": 300},
+	{"id": "ember_flask", "kind": "PERK", "name": "EMBER FLASK", "desc": "Restore 20 HP after every boss.", "cost": 200},
+]
 
 # two runes with the same sigil complete a set
 const SETS := {

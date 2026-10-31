@@ -58,6 +58,11 @@ var wins := 0
 var sets_done: Array[String] = []
 var unlocked_vigil := 0
 var achieved: Array = []
+# Codex entry ids unlocked by play (see Codex)
+var codex: Array = []
+var relics: Array = []
+var skill_meter := 0.0 ## 0..1, full = the weapon skill is ready
+var skill_hit := false ## true while a skill's own hits land, so they don't refill the meter
 var elite_kills := 0
 var run_braziers := 0
 var boss_untouched := false
@@ -201,7 +206,21 @@ func _smoke(dt: float) -> void:
 				m.cb.call(0)
 				print("smoke test: options ok, shake %.1f" % opt_shake)
 				opt_shake = 1.0
+				bank += 2000
+				var bought := 0
+				for i in RunData.RELICS.size():
+					if buy_relic(i):
+						bought += 1
+				print("smoke test: reliquary bought %d relics" % bought)
+				for w in RunData.SKILLS:
+					_equip(w)
+					skill_meter = 1.0
+					use_skill()
+				print("smoke test: all weapon skills fired")
 				hud.open_title(_smoke_title_ok)
+				# the Codex paints over the title during the map sweep
+				hud.codex = {"pick": Codex.ENTRIES.size() - 1, "t": 0.0}
+				print("smoke test: codex %d / %d" % [codex.size(), Codex.ENTRIES.size()])
 		3:
 			# every arena loads and runs briefly
 			smoke_p_t += dt
@@ -273,6 +292,7 @@ func start(i: int, show_title := false) -> void:
 	won = false
 	runes.clear()
 	sets_done.clear()
+	skill_meter = 0.0
 	offered.clear()
 	run_braziers = 0
 	lvl = 1
@@ -299,6 +319,8 @@ func _begin() -> void:
 		player.max_hp -= 1
 	if opt_hearts:
 		player.max_hp += 2
+	if "ashen_skin" in relics:
+		player.max_hp += 1
 	player.hp = player.max_hp
 	_play_once("prologue", Story.PROLOGUE, _weapon_draw)
 
@@ -412,18 +434,23 @@ func _play_once(id: String, cards: Array, cb: Callable) -> void:
 
 
 func _weapon_draw() -> void:
-	var pool := RunData.WEAPONS.keys().filter(func(k): return not RunData.WEAPONS[k].get("locked", false) or earned >= 400)
+	learn("norrow")
+	learn("hild")
+	learn("place_0")
+	var pool := RunData.WEAPONS.keys().filter(func(k): return not RunData.WEAPONS[k].get("locked", false) or k in relics)
 	pool.shuffle()
 	var opts := []
-	for k in pool.slice(0, 2):
+	for k in pool.slice(0, 3 if "second_draw" in relics else 2):
 		var wd: Dictionary = RunData.WEAPONS[k]
-		opts.append({"id": k, "name": wd.name, "desc": wd.desc, "tag": "WEAPON", "col": Color("#f3ebe0")})
+		opts.append({"id": k, "name": wd.name, "desc": "%s Skill: %s, %s" % [wd.desc, RunData.SKILLS[k].name, String(RunData.SKILLS[k].desc).to_lower()], "tag": "WEAPON", "col": Color("#f3ebe0")})
 	hud.open_choice("CHOOSE YOUR WEAPON", "A NEW DRAW EVERY RUN", opts, func(i): _pick_weapon(opts[i]))
 
 
 func _pick_weapon(o: Dictionary) -> void:
 	_equip(o.id)
 	hud.show_banner("DEPTH I", "%s · %s" % [o.name, Story.CHAPTERS[0].name], 1.8)
+	if "spare_rune" in relics:
+		_open_draft()
 
 
 func _equip(id: String) -> void:
@@ -467,6 +494,91 @@ func _log_run() -> void:
 		print("smoke test: run logged, won %s, depth %d" % [won, depth])
 
 
+## Unlocks a Codex entry once and shows a toast.
+func learn(id: String) -> void:
+	if id in codex:
+		return
+	var e := Codex.find(id)
+	if e.is_empty():
+		return
+	codex.append(id)
+	_save_meta()
+	hud.toasts.append({"name": e.name, "head": "NEW IN THE CODEX", "t": 0.0})
+	if codex.size() >= Codex.ENTRIES.size():
+		unlock("CODEX")
+	if smoke:
+		print("smoke test: codex %s" % id)
+
+
+## Buys relic i from the Reliquary if the bank allows. Returns true on a purchase.
+func buy_relic(i: int) -> bool:
+	var r: Dictionary = RunData.RELICS[i]
+	if r.id in relics or bank < r.cost:
+		return false
+	bank -= r.cost
+	relics.append(r.id)
+	_save_meta()
+	if relics.size() >= RunData.RELICS.size():
+		unlock("RELIQUARY")
+	return true
+
+
+## The weapon skill. Each weapon gets one big move; landing hits charges it.
+func use_skill() -> void:
+	skill_meter = 0.0
+	skill_hit = true
+	var p := player
+	var f := float(p.facing)
+	var base := p.damage * 3.0
+	hitstop = 0.12
+	shake(0.35, 12)
+	player.invuln = maxf(player.invuln, 0.4)
+	match weapon:
+		"katana":
+			var x0 := p.position.x
+			var x := x0
+			for i in 26:
+				var nx := x + f * 12
+				if world.is_solid(world.cell(nx + f * 12), world.cell(p.position.y - 30)):
+					break
+				x = nx
+			p.position.x = x
+			p.reset_physics_interpolation()
+			fx.burst(Vector2((x0 + x) / 2, p.position.y - 30), 30, Color("#f2b43a"), 200)
+			for e in enemies.duplicate():
+				if not e.dead and (e.position.x - x0) * f > -20 and (e.position.x - x) * f < 30 and absf(e.position.y - p.position.y) < 80:
+					hit_enemy(e, base, Vector2(f * 300, -300))
+		"greatsword":
+			fx.ring(p.position, 420, Color("#f2b43a"))
+			for e in enemies.duplicate():
+				if not e.dead and absf(e.position.x - p.position.x) < 420 and absf(e.position.y - p.position.y) < 50:
+					hit_enemy(e, base * 1.2, Vector2(signf(e.position.x - p.position.x) * 200, -700))
+		"spear":
+			p.vel.y = -1250
+			fx.burst(p.position + Vector2(0, -40), 24, Color("#f2b43a"), 260)
+			for e in enemies.duplicate():
+				if not e.dead and absf(e.position.x - p.position.x) < 60 and p.position.y - e.position.y > -40 and p.position.y - e.position.y < 380:
+					hit_enemy(e, base, Vector2(0, -800))
+		"daggers":
+			var near := enemies.filter(func(e): return not e.dead and e.position.distance_to(p.position) < 170)
+			for k in 8:
+				for e in near:
+					if not e.dead:
+						hit_enemy(e, base * 0.3, Vector2(signf(e.position.x - p.position.x) * 60, -60))
+			fx.ring(p.position + Vector2(0, -30), 170, Color("#f2b43a"))
+		"sickle":
+			for e in enemies.duplicate():
+				if not e.dead and e.position.distance_to(p.position) < 320 and e != boss:
+					e.position.x = p.position.x + signf(e.position.x - p.position.x) * 40
+					e.reset_physics_interpolation()
+					hit_enemy(e, base * 0.8, Vector2(0, -400))
+				elif e == boss and not e.dead and e.position.distance_to(p.position) < 320:
+					hit_enemy(e, base, Vector2.ZERO)
+			fx.ring(p.position + Vector2(0, -30), 320, Color("#f2b43a"))
+	skill_hit = false
+	hud.show_banner(RunData.SKILLS[weapon].name, "", 0.8)
+
+
 func on_player_hit() -> void:
 	boss_untouched = false
 
@@ -494,7 +606,7 @@ func xp_need() -> int:
 
 
 func _open_draft() -> void:
-	var pool := RunData.RUNES.keys().filter(func(k): return not (k in runes))
+	var pool := RunData.RUNES.keys().filter(func(k): return not (k in runes) and (not RunData.RUNES[k].get("locked", false) or k in relics))
 	pool.shuffle()
 	var opts := []
 	for k in pool.slice(0, 3):
@@ -572,6 +684,11 @@ func _load_meta() -> void:
 		best_depth = cfg.get_value("meta", "best_depth", 0)
 		wins = cfg.get_value("meta", "wins", 0)
 		achieved = cfg.get_value("achievements", "unlocked", [])
+		codex = cfg.get_value("meta", "codex", [])
+		relics = cfg.get_value("meta", "relics", [])
+		if earned >= 400 and not "sickle" in relics:
+			# saves from before the Reliquary unlocked the sickle at 400 earned
+			relics.append("sickle")
 		elite_kills = cfg.get_value("achievements", "elite_kills", 0)
 		var sh = cfg.get_value("options", "shake", 1.0)
 		opt_shake = (1.0 if sh else 0.0) if typeof(sh) == TYPE_BOOL else float(sh)
@@ -591,6 +708,8 @@ func _save_meta() -> void:
 	cfg.set_value("meta", "best_depth", best_depth)
 	cfg.set_value("meta", "wins", wins)
 	cfg.set_value("achievements", "unlocked", achieved)
+	cfg.set_value("meta", "codex", codex)
+	cfg.set_value("meta", "relics", relics)
 	cfg.set_value("achievements", "elite_kills", elite_kills)
 	cfg.set_value("options", "shake", opt_shake)
 	cfg.set_value("options", "fullscreen", opt_fullscreen)
@@ -660,6 +779,8 @@ func _physics_process(dt: float) -> void:
 			_end_run()
 		return
 	run_time += dt
+	if Input.is_action_just_pressed("skill") and skill_meter >= 1.0:
+		use_skill()
 	_step_pickups(dt)
 	if boss == null and not story_hold and depth < 16:
 		depth_t += dt
@@ -692,12 +813,14 @@ func next_depth() -> void:
 	else:
 		var sub: String = {2: "GLOOMWINGS JOIN", 3: "HEXERS APPEAR", 6: "BRUTES APPEAR"}.get(depth, "%d OF 15 STILL LIT" % (15 - candles_out()))
 		hud.show_banner("DEPTH %s · A CANDLE GOES OUT" % roman(depth), sub)
+		learn("hush")
 
 
 func _enter_chapter() -> void:
 	story_hold = false
 	var ch: Dictionary = Story.CHAPTERS[chapter()]
 	_load_arena(ch.map)
+	learn("place_%d" % chapter())
 	hud.show_banner("DEPTH %s" % roman(depth), ch.name, 2.2)
 
 
@@ -718,6 +841,7 @@ func _spawn_boss() -> void:
 	boss.reset_physics_interpolation()
 	enemies.append(boss)
 	boss_untouched = true
+	learn("strepitus")
 	shake(0.7, 18)
 	hitstop = 0.15
 	hud.show_banner("DEPTH %s · STREPITUS" % roman(depth), "%s DESCENDS" % boss.boss_name, 2.4)
@@ -725,6 +849,11 @@ func _spawn_boss() -> void:
 
 ## After a boss: its last words, then the merchant. After Saint Umber: the finale and the dawn.
 func _after_boss(ch: int) -> void:
+	learn("boss_%d" % ch)
+	if ch == 1:
+		learn("umber")
+	if "ember_flask" in relics:
+		heal(1)
 	if ch == 3:
 		hud.play(Story.ENDINGS[3], _victory)
 	else:
@@ -733,6 +862,7 @@ func _after_boss(ch: int) -> void:
 
 func _victory() -> void:
 	won = true
+	learn("dawn")
 	unlock("DAWN")
 	if hidden_candle and vigil < 3:
 		unlock("DAWN_UNAIDED")
@@ -889,6 +1019,11 @@ func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 	var guard := 0.5 if e.elite == "SHIELDED" and kb.x != 0 and signf(kb.x) == -e.facing else 1.0
 	if guard < 1:
 		fx.spark(e.position + Vector2(e.facing * 16, -30))
+	if not skill_hit and weapon != "":
+		var was_ready := skill_meter >= 1.0
+		skill_meter = minf(1.0, skill_meter + (0.05 if e == boss else 0.07))
+		if not was_ready and skill_meter >= 1.0:
+			hud.show_banner("%s READY" % RunData.SKILLS[weapon].name, "PRESS %s" % hud.btn("skill"), 1.0)
 	e.hp -= dmg * damage_mul() * guard * (1.6 if e == boss and has_rune("TALLOW CROWN") else 1.0)
 	e.knock(kb)
 	hitstop = maxf(hitstop, 0.05)
@@ -900,7 +1035,10 @@ func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 		fx.burst(e.position + Vector2(0, -28), 18, Color("#0a0a0d"), 260)
 		e.visible = false
 		_drop_wax(e.position + Vector2(0, -28), 26 if e == boss else (4 if e.kind == Enemy.Kind.BRUTE else 2) * (3 if e.elite != "" else 1))
+		if e != boss:
+			learn("foe_%d" % e.kind)
 		if e.elite != "":
+			learn("elite")
 			elite_kills += 1
 			if elite_kills >= 25:
 				unlock("ELITE_HUNTER")
@@ -962,7 +1100,10 @@ func _end_run() -> void:
 			vigil_max += 1
 			unlocked_vigil = vigil_max
 	_save_meta()
-	var unlocked := "CHAIN SICKLE" if before < 400 and earned >= 400 else ""
+	var unlocked := ""
+	var affordable := RunData.RELICS.filter(func(r): return not r.id in relics and r.cost <= bank and r.cost > bank - kept)
+	if not affordable.is_empty():
+		unlocked = "NEW IN THE RELIQUARY · %s" % affordable[0].name
 	if unlocked_vigil > 0:
 		unlocked = ("%s  ·  " % unlocked if unlocked != "" else "") + "VIGIL %s" % roman(unlocked_vigil)
 		unlocked_vigil = 0
@@ -1045,9 +1186,9 @@ func _unhandled_input(ev: InputEvent) -> void:
 func _setup_input() -> void:
 	var keys := {
 		"left": [KEY_A, KEY_LEFT], "right": [KEY_D, KEY_RIGHT], "down": [KEY_S, KEY_DOWN], "up": [KEY_W, KEY_UP],
-		"jump": [KEY_SPACE, KEY_Z], "attack": [KEY_J, KEY_X], "dash": [KEY_K, KEY_SHIFT, KEY_C], "pause": [KEY_ESCAPE, KEY_P],
+		"jump": [KEY_SPACE, KEY_Z], "attack": [KEY_J, KEY_X], "dash": [KEY_K, KEY_SHIFT, KEY_C], "pause": [KEY_ESCAPE, KEY_P], "skill": [KEY_L, KEY_Q],
 	}
-	var pads := {"jump": JOY_BUTTON_A, "attack": JOY_BUTTON_X, "dash": JOY_BUTTON_RIGHT_SHOULDER, "pause": JOY_BUTTON_START}
+	var pads := {"jump": JOY_BUTTON_A, "attack": JOY_BUTTON_X, "dash": JOY_BUTTON_RIGHT_SHOULDER, "pause": JOY_BUTTON_START, "skill": JOY_BUTTON_Y}
 	var axes := {"left": [JOY_AXIS_LEFT_X, -1.0], "right": [JOY_AXIS_LEFT_X, 1.0], "up": [JOY_AXIS_LEFT_Y, -1.0], "down": [JOY_AXIS_LEFT_Y, 1.0]}
 	var dpad := {"left": JOY_BUTTON_DPAD_LEFT, "right": JOY_BUTTON_DPAD_RIGHT, "up": JOY_BUTTON_DPAD_UP, "down": JOY_BUTTON_DPAD_DOWN}
 	for action in keys:
