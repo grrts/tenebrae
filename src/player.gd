@@ -32,6 +32,7 @@ extends Actor
 @export var slam_speed := 1750.0
 @export var slam_radius := 160.0
 @export var damage := 1.0
+@export var blade_len := 58.0
 
 var game: Game
 
@@ -85,7 +86,7 @@ func state_name() -> String:
 
 
 func _physics_process(dt: float) -> void:
-	if game == null or game.hitstop > 0:
+	if game == null or game.hitstop > 0 or game.frozen:
 		return
 	if dead:
 		vel.x = move_toward(vel.x, 0, 1600 * dt)
@@ -123,7 +124,7 @@ func _physics_process(dt: float) -> void:
 		for e in game.enemies:
 			if not e.dead and e.dashed != game.dash_id and absf(e.position.x - position.x) < 34 and absf(e.position.y - position.y) < 70:
 				e.dashed = game.dash_id
-				game.hit_enemy(e, damage, Vector2(facing * 260, -260))
+				game.hit_enemy(e, damage * (3.0 if game.has_rune("EMBER DASH") else 1.0), Vector2(facing * 260, -260))
 		if dash <= 0:
 			vel.x = run_speed * facing * 0.6
 		_move(dt, false)
@@ -141,7 +142,7 @@ func _physics_process(dt: float) -> void:
 			game.fx.ring(position, slam_radius, Color("#f2b43a"))
 			for e in game.enemies:
 				if not e.dead and absf(e.position.x - position.x) < slam_radius and absf(e.position.y - position.y) < 90:
-					game.hit_enemy(e, damage * 2, Vector2(signf(e.position.x - position.x) * 320, -520))
+					game.hit_enemy(e, damage * 2 * (1.7 if game.has_rune("HEAVY SHADOW") else 1.0), Vector2(signf(e.position.x - position.x) * 320, -520))
 		return
 
 	# --- attack input
@@ -204,6 +205,11 @@ func _physics_process(dt: float) -> void:
 			kick = 0.22
 			dj_used = false
 			game.fx.burst(position + Vector2(wall * 8, -10), 8, Color(0.67, 0.47, 0.41, 0.6), 100)
+			if game.has_rune("UPDRAFT"):
+				game.fx.ring(position + Vector2(0, -30), 160, Color("#3fd6c4"))
+				for e in game.enemies:
+					if not e.dead and absf(e.position.x - position.x) < 160 and absf(e.position.y - position.y) < 170:
+						game.hit_enemy(e, 2, Vector2(facing * 220, -720))
 		elif not dj_used:
 			buffer = 0
 			dj_used = true
@@ -252,7 +258,7 @@ func _attack_hits() -> void:
 		if box.intersects(e.hurtbox()):
 			atk.hit.append(e)
 			var up := -420.0 if atk.step == 2 else -160.0
-			game.hit_enemy(e, damage * (1.5 if atk.step == 2 else 1.0), Vector2(facing * (380 if atk.step == 2 else 220), up))
+			game.hit_enemy(e, damage * (1.5 if atk.step == 2 else 1.0) * (2.0 if atk.step == 2 and game.has_rune("FINISHER") else 1.0), Vector2(facing * (380 if atk.step == 2 else 220), up))
 
 
 func take_hit(from_x: float) -> void:
@@ -372,4 +378,4 @@ func _draw() -> void:
 		ang = PI - 0.15 if facing > 0 else 0.15
 	else:
 		ang = (2.5 if facing > 0 else 0.64) + (0.0 if ground else -facing * 0.5)
-	Rig.blade(self, J.armF.e, ang, 58, 1.3 if atk != null or slam else 0.5)
+	Rig.blade(self, J.armF.e, ang, blade_len, 1.3 if atk != null or slam else 0.5)

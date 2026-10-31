@@ -25,7 +25,7 @@ func setup_boss(hp_mul: float) -> void:
 
 
 func _physics_process(dt: float) -> void:
-	if game == null or dead or game.hitstop > 0:
+	if game == null or dead or game.hitstop > 0 or game.frozen:
 		return
 	hit_t = maxf(0, hit_t - dt)
 	t -= dt
