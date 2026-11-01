@@ -12,6 +12,12 @@ The bot is a floor rather than a player model. It never reads projectiles or pla
 | Hollows lose contact damage | 3 | 2 to 4 | 90 s | Remaining hits: Gloomwing dives and Hollow lunges, both telegraphed. Found a crash when a VOLATILE burst hits the player mid-swing |
 | Crash fixed, bot dodges dives | 3 | 3 to 4 | 110 s | No errors in 6 runs |
 
+| Bot dodges lunges and swats dives | 3 | 3 to 4 | 114 s | Hits: Hollow lunges 18, Gloomwing dives 12, Hexers 3. All telegraphed |
+| Both assists (+40 HP, 70% speed) | 4 | 3 to 4 | 126 s | Clears depths 1 to 3, then loses to the Chain Warden. Boss patterns are beyond the bot |
+| Undying assist | 16 (won) | 2 of 2 won | 706 s | All four bosses beaten, no forced kills, no errors: a whole run finishes end to end |
+
+The bot has plateaued, so further tuning against it would flatten the game for real players. Final difficulty should come from human playtests (`tools/runs_report.py` on testers' `runs.jsonl`). The **Undying** assist covers players who just want the story, and the balance workflow's `undying` switch is the end-to-end check that a whole run can still be finished.
+
 ## What changed because of it
 
 - Hollows only hurt with their telegraphed lunge and vault, never by standing in you.
