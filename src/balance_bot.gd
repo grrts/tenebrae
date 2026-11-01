@@ -16,6 +16,7 @@ var dash_cd := 0.0
 var stuck_t := 0.0
 var last_x := 0.0
 var wander := 1
+var assist := false ## play with +40 HP and 70% speed
 var last_hp := -1.0
 var hits_logged := 0
 const ACTIONS := ["left", "right", "up", "down", "jump", "attack", "dash", "skill"]
@@ -29,7 +30,10 @@ func _init(g: Game, n: int) -> void:
 
 func step(dt: float) -> void:
 	frame += 1
-	Engine.time_scale = 4.0
+	Engine.time_scale = 4.0 * (0.7 if assist else 1.0)
+	if assist:
+		game.opt_hearts = true
+		game.opt_speed = 0.7
 	game.vigil_max = maxi(game.vigil_max, game.vigil)
 	for a in ACTIONS:
 		Input.action_release(a)

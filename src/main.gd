@@ -149,6 +149,9 @@ func _ready() -> void:
 		bot = BalanceBot.new(self, maxi(1, n))
 		if uargs.size() > bi + 2:
 			vigil = clampi(int(uargs[bi + 2]), 0, RunData.VIGILS.size() - 1)
+		if "assist" in uargs:
+			# both assists on: +40 HP and the game at 70% speed
+			bot.assist = true
 		Engine.time_scale = 4.0
 		print("balance: %d runs on Vigil %d" % [bot.runs, vigil])
 	if smoke:
