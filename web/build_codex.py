@@ -30,7 +30,7 @@ def _codex_build():
   const keyQ = [];
   addEventListener('keydown', e => {
     if (e.code === 'Tab') { e.preventDefault(); open = !open; }
-    else if (open && ['ArrowUp', 'KeyW', 'ArrowDown', 'KeyS', 'Escape', 'ShiftLeft', 'ShiftRight'].includes(e.code)) { e.preventDefault(); e.stopImmediatePropagation(); keyQ.push(e.code); }
+    else if (open && ['ArrowUp', 'KeyW', 'ArrowDown', 'KeyS', 'ShiftLeft', 'ShiftRight'].includes(e.code)) { e.preventDefault(); e.stopImmediatePropagation(); keyQ.push(e.code); }
   }, true);
   function learn(id) {
     if (got[id]) return; const e = E.find(x => x.id === id); if (!e) return;
@@ -79,7 +79,7 @@ def _codex_build():
       T(s.name, bx + 22, 136, `900 22px ${DISP}`, COL[s.cat]);
       ctx.font = `500 15px ${MONO}`; wrap(ctx, s.text, bw - 44).forEach((l, i) => T(l, bx + 22, 172 + i * 23, `500 15px ${MONO}`, '#d8d0c6'));
     } else { T('This page is still dark.', bx + 22, 136, `600 17px ${MONO}`, '#7d766f'); T('Keep descending.', bx + 22, 162, `500 13px ${MONO}`, '#5d5752'); }
-    T('↑ ↓  CHOOSE      TAB / ESC / SHIFT  BACK', W / 2, H - 22, `600 11px ${MONO}`, '#7d766f', 'center');
+    T('↑ ↓  CHOOSE      TAB / SHIFT  BACK', W / 2, H - 22, `600 11px ${MONO}`, '#7d766f', 'center');
     ctx.restore();
   }
   return { learn, step, draw, count, E };

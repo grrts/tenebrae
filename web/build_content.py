@@ -23,6 +23,9 @@ def _content_build():
     rep("          if (e.type === 'sp') { e.vx = 0;", "          if (CONTENT.ai(st, e, p, dx, dy, dt, sm, () => hitPlayer(dmgN))) {}\n          else if (e.type === 'sp') { e.vx = 0;")
     rep("      const reach = e.type === 'boss' ? 34 : 20;",
         "      if (e.pounce > 0) { e.pounce -= dt; if (p.hurt <= 0 && p.dash <= 0 && Math.abs(e.x - p.x) < 26 && Math.abs((e.y - e.h / 2) - (p.y - 28)) < 40) { e.pounce = 0; hitPlayer(dmgN); } }\n      const reach = e.type === 'boss' ? 34 : 20;")
+    # hollows ('sh') only hurt with their telegraphed lunge, never by standing in you (matches the Godot build)
+    rep("if (!p.slam && e.hit <= 0 && Math.abs(e.vx) < 200 && Math.abs(e.x - p.x) < reach",
+        "if (e.type !== 'sh' && !p.slam && e.hit <= 0 && Math.abs(e.vx) < 200 && Math.abs(e.x - p.x) < reach")
     rep("    for (const q of st.proj) { q.vy += 900 * dt;", "    for (const q of st.proj) { if (!q.blade) q.vy += 900 * dt;")
     rep("    else drawHexer(ctx, e.x, e.y, .7 * e.sc, st.time + e.o, e.f, look);",
         "    else if (e.type === 'sp') drawHexer(ctx, e.x, e.y, .7 * e.sc, st.time + e.o, e.f, look);\n    else CONTENT.draw(ctx, e, st, tt, look);")
