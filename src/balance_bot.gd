@@ -105,6 +105,12 @@ func _fight(p: Player, dt: float) -> void:
 		if e.dead or (e.tele <= 0 and e.act <= 0):
 			continue
 		var ex := e.position.x - p.position.x
+		# a diving gloomwing dies in one hit: swat it once it is in reach instead of running
+		if e.kind == Enemy.Kind.GLOOMWING and e.act > 0 and absf(ex) < p.reach and e.position.y > p.position.y - 110:
+			if (ex > 0) != (p.facing > 0):
+				Input.action_press("right" if ex > 0 else "left")
+			Input.action_press("attack")
+			return
 		var reach_y := 260.0 if e.kind == Enemy.Kind.GLOOMWING else 110.0
 		if absf(ex) < 170 and absf(e.position.y - p.position.y) < reach_y:
 			if dash_cd <= 0 and p.dash_cd <= 0:
