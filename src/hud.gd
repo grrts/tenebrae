@@ -63,7 +63,8 @@ func flash(col: Color, t := 0.25) -> void:
 func _card_dur(c: Dictionary) -> float:
 	if game.smoke:
 		return 0.35
-	return 3.2 if c.has("title") else 1.6 + String(c.get("text", "")).length() * 0.045
+	# bigger subtitles also stay up longer, for slower readers
+	return (3.2 if c.has("title") else 1.6 + String(c.get("text", "")).length() * 0.045) * (1.0 + (game.opt_text - 1.0) * 1.6)
 
 
 func _card_start() -> void:
@@ -460,9 +461,10 @@ func _paint_scene(vp: Vector2) -> void:
 			var px := mid.x - nw / 2
 			canvas.draw_colored_polygon(PackedVector2Array([Vector2(px + 12, y - 72), Vector2(px + nw + 12, y - 72), Vector2(px + nw - 12, y - 42), Vector2(px - 12, y - 42)]), Color(col, 0.9 * a))
 			_text(c.who, Vector2(mid.x, y - 50), 18, Color(0.05, 0.03, 0.04, a), true)
-		var lines := _wrap(String(c.text), minf(760, vp.x - 80), 22)
+		var ts := int(22 * game.opt_text)
+		var lines := _wrap(String(c.text), minf(760 * game.opt_text, vp.x - 80), ts)
 		for i in lines.size():
-			_text(lines[i], Vector2(mid.x, y + i * 32), 22, Color(0.92, 0.88, 0.84, a), true)
+			_text(lines[i], Vector2(mid.x, y + i * ts * 1.45), ts, Color(0.92, 0.88, 0.84, a), true)
 	_text("%s  NEXT      %s  SKIP" % [btn("jump"), btn("cancel")], Vector2(vp.x - 130, vp.y - 30), 11, Color(0.55, 0.5, 0.47), true)
 
 
