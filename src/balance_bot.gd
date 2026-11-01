@@ -112,13 +112,17 @@ func _fight(p: Player, dt: float) -> void:
 			Input.action_press("attack")
 			return
 		var reach_y := 260.0 if e.kind == Enemy.Kind.GLOOMWING else 110.0
-		if absf(ex) < 170 and absf(e.position.y - p.position.y) < reach_y:
+		var reach_x := 240.0 if e.kind == Enemy.Kind.HOLLOW else 170.0
+		if absf(ex) < reach_x and absf(e.position.y - p.position.y) < reach_y:
 			if dash_cd <= 0 and p.dash_cd <= 0:
 				Input.action_press("right" if ex > 0 else "left")
 				Input.action_press("dash")
 				dash_cd = 0.5
 			elif p.invuln <= 0:
 				Input.action_press("left" if ex > 0 else "right")
+				# no dash: hop over a low lunge
+				if e.kind == Enemy.Kind.HOLLOW and p.ground and e.tele > 0 and e.tele < 0.15:
+					Input.action_press("jump")
 			return
 	if game.skill_meter >= 1.0 and absf(dx) < 260 and absf(dy) < 120:
 		Input.action_press("skill")
