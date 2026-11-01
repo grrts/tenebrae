@@ -16,6 +16,7 @@ var dash_cd := 0.0
 var stuck_t := 0.0
 var last_x := 0.0
 var wander := 1
+var undying := false ## the Undying assist: checks a full run can be finished without forced kills
 var assist := false ## play with +40 HP and 70% speed
 var last_hp := -1.0
 var hits_logged := 0
@@ -31,6 +32,7 @@ func _init(g: Game, n: int) -> void:
 func step(dt: float) -> void:
 	frame += 1
 	Engine.time_scale = 4.0 * (0.7 if assist else 1.0)
+	game.opt_undying = undying
 	if assist:
 		game.opt_hearts = true
 		game.opt_speed = 0.7
@@ -68,8 +70,11 @@ func step(dt: float) -> void:
 					int(e.position.x - p.position.x), int(e.position.y - p.position.y), e.tele, e.act, e.mode])
 		print("balance: HIT at %.1fs hp %.0f ground %s dash %.2f dashcd %.2f | %s" % [run_t, p.hp, p.ground, p.dash, p.dash_cd, "; ".join(near)])
 	last_hp = p.hp
-	if run_t > RUN_LIMIT:
+	if run_t > RUN_LIMIT * (2.0 if undying else 1.0):
 		print("balance: run stalled at depth %d, ending it" % game.depth)
+		game.opt_undying = false
+		p.invuln = 0
+		p.dash = 0
 		p.hp = 0
 		p.take_hit(p.position.x + 1)
 		return

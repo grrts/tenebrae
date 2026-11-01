@@ -319,6 +319,9 @@ func take_hit(from_x: float) -> void:
 	if invuln > 0 or dash > 0 or dead:
 		return
 	hp -= 1
+	if game.opt_undying and hp < 1:
+		# assist: the wick gutters but never goes out
+		hp = 1
 	game.on_player_hit()
 	invuln = 1.0
 	vel = Vector2(signf(position.x - from_x) * 360, -420)
