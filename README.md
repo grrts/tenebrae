@@ -63,7 +63,7 @@ Every run appends one line to `user://runs.jsonl` (depth, time, win, weapon, run
 
 ## Achievements
 
-Twelve achievements live in `src/achievements.gd` (bosses, the dawn, a win without the hidden candle, Vigil V, an untouched boss, sets, cursed runes, braziers and elites). They are saved to `user://wickbearer.cfg`, pop up as a toast, and are counted on the title screen. Their ids are the Steamworks API names, so the Steam build only needs a `SetAchievement(id)` call in `Game.unlock()`.
+Fourteen achievements live in `src/achievements.gd` (bosses, the dawn, a win without the hidden candle, Vigil V, an untouched boss, sets, cursed runes, braziers and elites). They are saved to `user://wickbearer.cfg`, pop up as a toast, and are counted on the title screen. Their ids are the Steamworks API names, and `src/steam_bridge.gd` sends them to Steam in a GodotSteam build. See `docs/STEAM.md`.
 
 ## The story
 

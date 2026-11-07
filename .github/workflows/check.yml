@@ -69,3 +69,40 @@ jobs:
           files: |
             Wickbearer-windows.zip
             Wickbearer-linux.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: builds
+          path: build
+          retention-days: 7
+
+  # Uploads each green main build to the Steam "beta" branch once Steamworks is set up
+  # (docs/STEAM.md). Until the secrets and the app id exist it only leaves a notice.
+  # It never touches the default branch: going live stays a manual step in Steamworks.
+  steam:
+    needs: release
+    runs-on: ubuntu-latest
+    env:
+      STEAM_READY: ${{ secrets.STEAM_CONFIG_VDF != '' && secrets.STEAM_USERNAME != '' && vars.STEAM_APP_ID != '' }}
+    steps:
+      - name: Waiting for Steamworks
+        if: env.STEAM_READY != 'true'
+        run: echo "::notice::Steam upload skipped. Add the STEAM_USERNAME and STEAM_CONFIG_VDF secrets and the STEAM_APP_ID variable, see docs/STEAM.md"
+      - uses: actions/download-artifact@v4
+        if: env.STEAM_READY == 'true'
+        with:
+          name: builds
+          path: build
+      - name: steam_appid.txt is for local testing only, never shipped
+        if: env.STEAM_READY == 'true'
+        run: rm -f build/windows/steam_appid.txt build/linux/steam_appid.txt
+      - uses: game-ci/steam-deploy@v3
+        if: env.STEAM_READY == 'true'
+        with:
+          username: ${{ secrets.STEAM_USERNAME }}
+          configVdf: ${{ secrets.STEAM_CONFIG_VDF }}
+          appId: ${{ vars.STEAM_APP_ID }}
+          buildDescription: playtest-${{ github.run_number }} ${{ github.sha }}
+          rootPath: build
+          depot1Path: windows
+          depot2Path: linux
+          releaseBranch: beta

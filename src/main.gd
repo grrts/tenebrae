@@ -160,7 +160,12 @@ func _ready() -> void:
 	if smoke:
 		depth_time = 2.0
 		print("smoke test: start")
+	_migrate_old_saves()
 	_load_meta()
+	SteamBridge.init()
+	# achievements earned before Steam was there (or offline) sync on start
+	for id in achieved:
+		SteamBridge.achieve(id)
 	_apply_options()
 	start(0, not smoke)
 
@@ -594,6 +599,7 @@ func unlock(id: String) -> void:
 		return
 	achieved.append(id)
 	_save_meta()
+	SteamBridge.achieve(id)
 	for a in Achievements.LIST:
 		if a.id == id:
 			hud.toasts.append({"name": a.name, "t": 0.0})
@@ -801,6 +807,19 @@ func _buy(o: Dictionary) -> void:
 		temper += 1
 
 
+## Saves from playtest builds lived under the old project name; bring them over once.
+func _migrate_old_saves() -> void:
+	if FileAccess.file_exists(SAVE_PATH):
+		return
+	var old := OS.get_user_data_dir().get_base_dir().path_join("Wickbearer Prototype")
+	for f in ["wickbearer.cfg", "wickbearer.cfg.bak", "runs.jsonl"]:
+		var src := old.path_join(f)
+		if FileAccess.file_exists(src):
+			DirAccess.copy_absolute(src, "user://" + f)
+	if FileAccess.file_exists(SAVE_PATH):
+		print("save: moved playtest saves from %s" % old)
+
+
 func _load_meta() -> void:
 	var cfg := ConfigFile.new()
 	# a save cut off mid-write or hand-edited into garbage falls back to the last good copy
@@ -993,6 +1012,7 @@ func next_depth() -> void:
 	depth_t = 0.0
 	depth += 1
 	shake(0.15, 4)
+	SteamBridge.presence("Depth %s · %s" % [roman(depth), Story.CHAPTERS[Story.chapter_of(depth)].name.capitalize()])
 	var ch := chapter()
 	if depth % 4 == 0:
 		# the strepitus: the boss is revealed, then crashes down
@@ -1290,6 +1310,8 @@ func _end_run() -> void:
 		if vigil == vigil_max and vigil_max < RunData.VIGILS.size() - 1:
 			vigil_max += 1
 			unlocked_vigil = vigil_max
+	SteamBridge.stat("BEST_DEPTH", best_depth)
+	SteamBridge.stat("DAWNS", wins)
 	_save_meta()
 	var unlocked := ""
 	var affordable := RunData.RELICS.filter(func(r): return not r.id in relics and r.cost <= bank and r.cost > bank - kept)
@@ -1316,6 +1338,7 @@ func debug_box(r: Rect2, c: Color) -> void:
 
 
 func _process(dt: float) -> void:
+	SteamBridge.tick()
 	if shake_t > 0:
 		shake_t -= dt
 		camera.offset = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * shake_mag * clampf(shake_t * 6, 0, 1)
