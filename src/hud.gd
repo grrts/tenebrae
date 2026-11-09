@@ -131,7 +131,7 @@ func _process(dt: float) -> void:
 	elif title_screen != null:
 		title_screen.t += dt
 		if title_screen.t > 0.4 and Input.is_action_just_pressed("dash"):
-			reliquary = {"pick": 0, "t": 0.0, "msg": "", "msg_t": 0.0}
+			reliquary = {"pick": 0, "col": 0, "t": 0.0, "msg": "", "msg_t": 0.0}
 		if title_screen.t > 0.4 and Input.is_action_just_pressed("skill"):
 			codex = {"pick": 0, "t": 0.0}
 		if Input.is_action_just_pressed("left"):
@@ -187,7 +187,10 @@ func _process(dt: float) -> void:
 		summary.t += dt
 		if summary.t > 1.2 and game.ok_pressed():
 			summary = null
-			game.start(0)
+			# between runs: the title, with the Reliquary already open so the ash gets spent
+			game.start(0, not game.smoke)
+			if not game.smoke:
+				reliquary = {"pick": 0, "col": 0, "t": 0.0, "msg": "", "msg_t": 0.0}
 	elif Input.is_action_just_pressed("pause") and game.player != null and not game.player.dead:
 		game.open_pause()
 	canvas.queue_redraw()
@@ -300,7 +303,7 @@ func _paint_title(vp: Vector2) -> void:
 	_text(stats + "   ·   ACHIEVEMENTS %d / %d" % [game.achieved.size(), Achievements.LIST.size()], Vector2(mid.x, vp.y - 110), 13, Color(0.6, 0.57, 0.54), true)
 	var blink := 0.5 + 0.5 * sin(t * 4)
 	_text("PRESS %s TO DESCEND" % btn("jump"), Vector2(mid.x, vp.y - 70), 16, Color(0.95, 0.92, 0.88, 0.4 + 0.6 * blink), true)
-	var open := RunData.RELICS.filter(func(r): return not r.id in game.relics).size()
+	var open := RunData.RELICS.filter(func(r): return not r.id in game.relics).size() + RunData.BLESSINGS.filter(func(b): return game.rank(b.id) < RunData.blessing_max(b)).size()
 	var rq := "%s  THE RELIQUARY  ·  %d TO BUY" % [btn("dash"), open] if open > 0 else "THE RELIQUARY IS COMPLETE"
 	var cx := "%s  THE CODEX  ·  %d / %d" % [btn("skill"), game.codex.size(), Codex.ENTRIES.size()]
 	_text(rq + "      " + cx, Vector2(mid.x, vp.y - 44), 12, Color("#3fd6c4"), true)
@@ -353,53 +356,135 @@ func _paint_codex(vp: Vector2) -> void:
 	_text("UP / DOWN  CHOOSE      %s  BACK" % btn("dash"), Vector2(mid.x, vp.y - 30), 12, Color(0.55, 0.5, 0.47), true)
 
 
+# The Reliquary has two columns: Blessings (ranked stat boosts) on the left and Relics (one-time
+# unlocks) on the right. The row under them holds the waystone (left) and the refund (right).
+func _rel_rows(col: int) -> int:
+	return (RunData.BLESSINGS.size() if col == 0 else RunData.RELICS.size()) + 1
+
+
 func _step_reliquary(dt: float) -> void:
 	var r: Dictionary = reliquary
 	r.t += dt
 	r.msg_t = maxf(0, r.msg_t - dt)
-	var n := RunData.RELICS.size()
+	r.refund = maxf(0, r.get("refund", 0.0) - dt)
+	var col: int = r.get("col", 0)
+	var n := _rel_rows(col)
+	var row: int = r.pick
 	if Input.is_action_just_pressed("up"):
-		r.pick = (r.pick + n - 1) % n
+		row = (row + n - 1) % n
 	if Input.is_action_just_pressed("down"):
-		r.pick = (r.pick + 1) % n
+		row = (row + 1) % n
+	var way_row := col == 0 and row == n - 1
+	if way_row and (Input.is_action_just_pressed("left") or Input.is_action_just_pressed("right")):
+		_turn_waystone(r, -1 if Input.is_action_just_pressed("left") else 1)
+	elif Input.is_action_just_pressed("left") or Input.is_action_just_pressed("right"):
+		col = 1 - col
+		row = mini(row, _rel_rows(col) - 1)
+	r.col = col
+	r.pick = row
 	if r.t > 0.25 and (Input.is_action_just_pressed("dash") or Input.is_action_just_pressed("pause") or Input.is_action_just_pressed("back")):
 		reliquary = null
 		return
 	if r.t > 0.25 and game.ok_pressed():
-		var rel: Dictionary = RunData.RELICS[r.pick]
-		if rel.id in game.relics:
-			r.msg = "ALREADY YOURS"
-		elif game.buy_relic(r.pick):
-			r.msg = "%s IS YOURS" % rel.name
+		r.msg_t = 1.8
+		if col == 0 and row < RunData.BLESSINGS.size():
+			var b: Dictionary = RunData.BLESSINGS[row]
+			var rk := game.rank(b.id)
+			if rk >= RunData.blessing_max(b):
+				r.msg = "%s IS AT ITS LAST RANK" % b.name
+			elif game.buy_blessing(row):
+				r.msg = "%s %s  ·  %s" % [b.name, Game.roman(rk + 1), (b.fmt % b.vals[rk + 1]).to_upper()]
+			else:
+				r.msg = "NOT ENOUGH ASH"
+		elif col == 0:
+			_turn_waystone(r, 1)
+		elif row < RunData.RELICS.size():
+			var rel: Dictionary = RunData.RELICS[row]
+			if rel.id in game.relics:
+				r.msg = "ALREADY YOURS"
+			elif game.buy_relic(row):
+				r.msg = "%s IS YOURS" % rel.name
+			else:
+				r.msg = "NOT ENOUGH ASH"
 		else:
-			r.msg = "NOT ENOUGH ASH"
-		r.msg_t = 1.6
+			var back := game.blessings_refund_value()
+			if back <= 0:
+				r.msg = "NO BLESSINGS TO REFUND"
+			elif r.refund <= 0:
+				r.refund = 3.0
+				r.msg = "PRESS AGAIN TO REFUND %d ASH" % back
+			else:
+				r.refund = 0.0
+				r.msg = "REFUNDED %d ASH · RELICS STAY" % game.refund_blessings()
+
+
+func _turn_waystone(r: Dictionary, d: int) -> void:
+	if game.waystone <= 0:
+		r.msg = "SLAY THE CHAIN WARDEN TO LIGHT THE FIRST WAYSTONE"
+		r.msg_t = 1.8
+		return
+	game.start_ch = (mini(game.start_ch, game.waystone) + d + game.waystone + 1) % (game.waystone + 1)
+	game._save_meta()
 
 
 func _paint_reliquary(vp: Vector2) -> void:
 	var r: Dictionary = reliquary
+	var col: int = r.get("col", 0)
 	canvas.draw_rect(Rect2(Vector2.ZERO, vp), Color(0.02, 0.01, 0.02, 0.95))
 	var mid := vp / 2
-	_text("THE RELIQUARY", Vector2(mid.x, 80), 40, Color("#f3ebe0"), true)
-	_text("BANKED ASH %d  ·  WHAT YOU BUY HERE STAYS FOREVER" % game.bank, Vector2(mid.x, 108), 13, Color("#3fd6c4"), true)
-	var x0 := mid.x - 360
+	var gold := Color("#f2b43a")
+	_text("THE RELIQUARY", Vector2(mid.x, 64), 40, Color("#f3ebe0"), true)
+	_text("BANKED ASH %d  ·  WHAT YOU BUY HERE STAYS WITH EVERY RUN" % game.bank, Vector2(mid.x, 92), 13, Color("#3fd6c4"), true)
+	var cw := minf(560.0, (vp.x - 60) / 2)
+	var xs := [mid.x - cw - 10, mid.x + 10]
+	var rh := 42.0
+	var y0 := 130.0
+	_text("BLESSINGS · RANKED, PERMANENT", Vector2(xs[0], y0 - 8), 11, Color(0.6, 0.57, 0.54))
+	_text("RELICS · ONE-TIME UNLOCKS", Vector2(xs[1], y0 - 8), 11, Color(0.6, 0.57, 0.54))
+	for i in RunData.BLESSINGS.size():
+		var b: Dictionary = RunData.BLESSINGS[i]
+		var rk := game.rank(b.id)
+		var mx := RunData.blessing_max(b)
+		var at_max := rk >= mx
+		var cost := 0 if at_max else RunData.blessing_price(b, rk)
+		var y := y0 + i * (rh + 4)
+		_rel_box(xs[0], y, cw, rh, col == 0 and r.pick == i)
+		_text(b.name, Vector2(xs[0] + 12, y + 18), 15, Color("#f3ebe0") if rk > 0 else Color(0.78, 0.74, 0.7))
+		for k in mx:
+			canvas.draw_rect(Rect2(xs[0] + 140 + k * 13, y + 9, 8, 8), gold if k < rk else Color(1, 1, 1, 0.12))
+		var desc: String = (b.fmt % b.vals[rk]) if at_max else ((b.fmt % b.vals[rk]) + "  >  " + (b.fmt % b.vals[rk + 1]) if rk > 0 else b.fmt % b.vals[1])
+		_text(desc, Vector2(xs[0] + 12, y + 35), 11, Color(0.7, 0.66, 0.62))
+		_text("MAX" if at_max else "%d ASH" % cost, Vector2(xs[0] + cw - 80, y + 26), 14, Color("#3fd6c4") if at_max else (gold if game.bank >= cost else Color(0.45, 0.42, 0.4)))
 	for i in RunData.RELICS.size():
 		var rel: Dictionary = RunData.RELICS[i]
-		var y := 140.0 + i * 46
-		var sel: bool = i == r.pick
+		var y := y0 + i * (rh + 4)
 		var owned: bool = rel.id in game.relics
 		var can: bool = game.bank >= rel.cost
-		canvas.draw_rect(Rect2(x0, y, 720, 40), Color(0.08, 0.06, 0.09, 1) if sel else Color(0.05, 0.04, 0.06, 1))
-		if sel:
-			canvas.draw_rect(Rect2(x0, y, 720, 40), Color("#f2b43a"), false, 2)
-		var col := Color(0.55, 0.52, 0.5) if owned else (Color("#f3ebe0") if can else Color(0.45, 0.42, 0.4))
-		_text(rel.kind, Vector2(x0 + 14, y + 25), 10, Color("#3fd6c4") if rel.kind == "PERK" else (Color("#f2b43a") if rel.kind == "WEAPON" else Color("#b44dff")))
-		_text(rel.name, Vector2(x0 + 80, y + 18), 15, col)
-		_text(rel.desc, Vector2(x0 + 80, y + 35), 11, Color(0.75, 0.7, 0.66) if not owned else Color(0.5, 0.47, 0.45))
-		_text("OWNED" if owned else "%d ASH" % rel.cost, Vector2(x0 + 650, y + 26), 13, Color("#3fd6c4") if owned else (Color("#f2b43a") if can else Color(0.5, 0.45, 0.4)))
+		_rel_box(xs[1], y, cw, rh, col == 1 and r.pick == i)
+		_text(rel.name, Vector2(xs[1] + 12, y + 18), 15, Color(0.55, 0.52, 0.5) if owned else (Color("#f3ebe0") if can else Color(0.6, 0.57, 0.54)))
+		_text(rel.kind, Vector2(xs[1] + 170, y + 18), 10, Color("#3fd6c4") if rel.kind == "PERK" else (gold if rel.kind == "WEAPON" else Color("#b44dff")))
+		_text(rel.desc, Vector2(xs[1] + 12, y + 35), 11, Color(0.7, 0.66, 0.62) if not owned else Color(0.5, 0.47, 0.45))
+		_text("OWNED" if owned else "%d ASH" % rel.cost, Vector2(xs[1] + cw - 80, y + 26), 14, Color("#3fd6c4") if owned else (gold if can else Color(0.45, 0.42, 0.4)))
+	# the bottom row: waystone and refund
+	var yb := y0 + maxi(RunData.BLESSINGS.size(), RunData.RELICS.size()) * (rh + 4) + 6
+	var sc := mini(game.start_ch, game.waystone)
+	var names := ["THE PIT OF PSALMS", "THE DROWNED WELL", "THE BLADEWORKS", "THE HOLLOW THRONE"]
+	var bosses := ["THE CHAIN WARDEN", "THE HOLLOW KING", "THE ASHEN JARL"]
+	_rel_box(xs[0], yb, cw, rh, col == 0 and r.pick == RunData.BLESSINGS.size())
+	_text("START AT   <  CHAPTER %s · %s  >" % [Game.roman(sc + 1), names[sc]], Vector2(xs[0] + 12, yb + 18), 15, Color("#f3ebe0") if game.waystone > 0 else Color(0.5, 0.47, 0.45))
+	_text("WAYSTONES %d/3 · SLAY %s TO LIGHT THE NEXT" % [game.waystone, bosses[game.waystone]] if game.waystone < 3 else "EVERY WAYSTONE IS LIT", Vector2(xs[0] + 12, yb + 35), 11, Color(0.6, 0.57, 0.54))
+	_rel_box(xs[1], yb, cw, rh, col == 1 and r.pick == RunData.RELICS.size())
+	var back := game.blessings_refund_value()
+	_text("CONFIRM: REFUND %d ASH" % back if r.get("refund", 0.0) > 0 else "REFUND BLESSINGS · %d ASH BACK" % back, Vector2(xs[1] + 12, yb + 26), 14, Color("#e5383b") if r.get("refund", 0.0) > 0 else Color(0.7, 0.66, 0.62))
 	if r.msg_t > 0:
-		_text(r.msg, Vector2(mid.x, vp.y - 70), 20, Color("#f2b43a"), true)
-	_text("UP / DOWN  CHOOSE      %s  BUY      %s  BACK" % [btn("jump"), btn("dash")], Vector2(mid.x, vp.y - 30), 12, Color(0.55, 0.5, 0.47), true)
+		_text(r.msg, Vector2(mid.x, vp.y - 62), 18, gold, true)
+	_text("ARROWS  CHOOSE      %s  BUY      %s  BACK TO THE TITLE" % [btn("jump"), btn("dash")], Vector2(mid.x, vp.y - 28), 12, Color(0.55, 0.5, 0.47), true)
+
+
+func _rel_box(x: float, y: float, w: float, h: float, sel: bool) -> void:
+	canvas.draw_rect(Rect2(x, y, w, h), Color(0.08, 0.06, 0.09, 1) if sel else Color(0.05, 0.04, 0.06, 1))
+	if sel:
+		canvas.draw_rect(Rect2(x, y, w, h), Color("#f2b43a"), false, 2)
 
 
 ## Souls-like death: a black band fades in and EXTINGUISHED slowly grows in it.
@@ -528,7 +613,7 @@ func _paint_summary(vp: Vector2) -> void:
 		var x := vp.x / 2 + (i - 1.5) * 160
 		_text(cols[i][0], Vector2(x, 190), 13, Color(0.6, 0.57, 0.54), true)
 		_text(cols[i][1], Vector2(x, 236), 40, Color("#f3ebe0"), true)
-	_text("ASH COLLECTED %d   ·   %s%s +%d" % [s.wax, "ALL KEPT" if s.won else "40% KEPT", " + BOSS BONUS" if s.bosses > 0 else "", s.kept], Vector2(vp.x / 2, 300), 16, Color("#3fd6c4"), true)
+	_text("ASH COLLECTED %d   ·   %s%s +%d" % [s.wax, "ALL KEPT" if s.won else "%d%% KEPT" % s.get("keep_pct", 40), " + BOSS BONUS" if s.bosses > 0 else "", s.kept], Vector2(vp.x / 2, 300), 16, Color("#3fd6c4"), true)
 	_text("BANKED ASH %d" % s.bank, Vector2(vp.x / 2, 330), 16, Color("#f3ebe0"), true)
 	if s.unlocked != "":
 		_text("UNLOCKED · %s" % s.unlocked, Vector2(vp.x / 2, 380), 30, Color("#f2b43a"), true)
