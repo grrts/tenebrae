@@ -111,7 +111,7 @@ const META = (() => {
   }
   const sync = o => { o.pick = o.col * 100 + o.row; };
   function close(st) { save(); st.ov = null; newRun(st); }
-  function say(o, s, col) { o.msg = { s, col: col || '#9a9289', t: 2.2 }; }
+  function say(o, s, col) { o.msg = { s, col: col || '#e6ddd2', t: 2.2 }; }
   function act(st, o) {
     if (o.col === 0) {
       const b = BLESS[o.row], r = rank(b.id);
@@ -162,58 +162,69 @@ const META = (() => {
     mouse.x = (e.clientX - b.left) / b.width * lastW; mouse.y = (e.clientY - b.top) / b.height * lastH; mouse.moved = true;
   });
 
-  function pips(ctx, x, y, n, of, col) { for (let k = 0; k < of; k++) diamond(ctx, x + k * 13, y, 4.5, k < n ? col : 'rgba(255,255,255,.12)', null); }
+  function pips(ctx, x, y, n, of, col) { for (let k = 0; k < of; k++) diamond(ctx, x + k * 17, y, 6, k < n ? col : 'rgba(255,255,255,.14)', null); }
   function row(ctx, txt, o, col, r, x, y, w, h, sel, flash) {
     rects.push({ col, row: r, x, y, w, h });
-    rrect(ctx, x, y, w, h, 7); ctx.fillStyle = sel ? '#1d1520' : 'rgba(18,13,20,.85)'; if (sel) { ctx.shadowColor = C.gold; ctx.shadowBlur = 16; } ctx.fill(); ctx.shadowBlur = 0;
-    ctx.strokeStyle = flash ? C.gold : sel ? C.gold : 'rgba(255,255,255,.1)'; ctx.lineWidth = sel || flash ? 2 : 1; ctx.stroke();
+    rrect(ctx, x, y, w, h, 7); ctx.fillStyle = sel ? '#24192a' : 'rgba(18,13,20,.85)'; if (sel) { ctx.shadowColor = C.gold; ctx.shadowBlur = 18; } ctx.fill(); ctx.shadowBlur = 0;
+    ctx.strokeStyle = flash || sel ? C.gold : 'rgba(255,255,255,.1)'; ctx.lineWidth = sel || flash ? 2.5 : 1; ctx.stroke();
     if (flash) { ctx.save(); ctx.globalAlpha *= flash; ctx.fillStyle = 'rgba(242,180,58,.25)'; ctx.fill(); ctx.restore(); }
+  }
+  // what the selected row does, in full, for the strip under the lists
+  function detail(o) {
+    if (o.col === 0) { const b = BLESS[o.row], r = rank(b.id);
+      return [b.name + (r ? ` ${roman(r)}` : ''), r >= b.max ? `${b.d(r)}  ·  FULLY UPGRADED` : r ? `Now: ${b.d(r)}   Next: ${b.d(r + 1)}` : b.d(1)]; }
+    if (o.row < C1) { const u = RELICS[o.row]; return [`${u.name} · ${u.kind}`, u.d]; }
+    if (o.row === ROW_WAY) return ['WAYSTONE', SV.way ? 'Pick the chapter your next run starts in. Later chapters give you the levels and free runes you skipped.' : 'Slay the Chain Warden once to start future runs at Chapter II.'];
+    if (o.row === ROW_REF) return ['REFUND', 'Get back all the ash spent on Blessings to buy a different set. Relics stay yours.'];
+    return ['DESCEND', 'Start the next run with everything you bought.'];
   }
   function draw(ctx, st, W, H, txt) {
     const o = st.ov, t = o.t, fade = clamp(t * 5, 0, 1); lastW = W; lastH = H; rects = [];
-    ctx.save(); ctx.globalAlpha = fade * .94; ctx.fillStyle = '#050304'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = fade;
-    ctx.shadowColor = C.gold; ctx.shadowBlur = 20; txt('THE RELIQUARY', W / 2, 52, `900 38px ${DISP}`, '#f3ebe0', 'center', 6); ctx.shadowBlur = 0;
-    txt(`◆ ${SV.ash} ASH`, W / 2, 84, `900 22px ${DISP}`, C.gold, 'center', 4);
-    txt(`RUNS ${SV.runs} · DEEPEST ${SV.best ? roman(SV.best) : '-'} · DAWNS ${SV.dawns} · WHAT YOU BUY HERE STAYS WITH EVERY RUN`, W / 2, 104, `600 10px ${MONO}`, '#7d766f', 'center', 3);
-    const gx = 22, cw = (W - gx * 3) / 2, y0 = 124, rh = 44, gap = 4;
-    txt('BLESSINGS · RANKED, PERMANENT', gx, y0 - 6, `600 10px ${MONO}`, '#9a9289', 'left', 3);
-    txt('RELICS · ONE-TIME UNLOCKS', gx * 2 + cw, y0 - 6, `600 10px ${MONO}`, '#9a9289', 'left', 3);
+    ctx.save(); ctx.globalAlpha = fade; ctx.fillStyle = '#050304'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = fade;
+    ctx.shadowColor = C.gold; ctx.shadowBlur = 20; txt('THE RELIQUARY', W / 2 - 110, 52, `900 46px ${DISP}`, '#f3ebe0', 'center', 6); ctx.shadowBlur = 0;
+    txt(`◆ ${SV.ash} ASH`, W / 2 + 130, 52, `900 34px ${DISP}`, C.gold, 'left', 5);
+    txt(`RUNS ${SV.runs} · DEEPEST ${SV.best ? roman(SV.best) : '-'} · DAWNS ${SV.dawns}`, W / 2, 80, `600 13px ${MONO}`, '#8a827a', 'center', 3);
+    const gx = 18, cw = (W - gx * 3) / 2, y0 = 116, rh = 40, gap = 4, x1 = gx * 2 + cw;
+    txt('BLESSINGS · STAT UPGRADES', gx + 2, y0 - 9, `600 13px ${MONO}`, C.gold, 'left', 3);
+    txt('RELICS · UNLOCKS', x1 + 2, y0 - 9, `600 13px ${MONO}`, C.cyan, 'left', 3);
     BLESS.forEach((b, i) => {
-      const x = gx, y = y0 + i * (rh + gap), r = rank(b.id), sel = o.col === 0 && o.row === i, mx = r >= b.max, c = mx ? 0 : price(b, r), ok = !mx && SV.ash >= c;
-      const fl = o.flash && o.flash.k === 'b' + i ? o.flash.t / .6 : 0;
-      row(ctx, txt, o, 0, i, x, y, cw, rh, sel, fl);
-      txt(b.name, x + 12, y + 19, `900 17px ${DISP}`, r ? '#f3ebe0' : '#c9bfb4', 'left', 3); pips(ctx, x + 132, y + 13, r, b.max, C.gold);
-      txt(mx ? b.d(r) : r ? `${b.d(r)}  →  ${b.d(r + 1)}` : b.d(1), x + 12, y + 36, `500 11px ${BODY}`, '#9a9289', 'left', 3);
-      txt(mx ? 'MAX' : `◆ ${c}`, x + cw - 12, y + 27, `900 17px ${DISP}`, mx ? C.cyan : ok ? C.gold : '#5a534d', 'right', 3);
+      const y = y0 + i * (rh + gap), r = rank(b.id), sel = o.col === 0 && o.row === i, mx = r >= b.max, c = mx ? 0 : price(b, r), ok = !mx && SV.ash >= c;
+      row(ctx, txt, o, 0, i, gx, y, cw, rh, sel, o.flash && o.flash.k === 'b' + i ? o.flash.t / .6 : 0);
+      txt(b.name, gx + 14, y + 29, `900 24px ${DISP}`, sel || r ? '#f3ebe0' : '#c9bfb4', 'left', 4); pips(ctx, gx + 196, y + 20, r, b.max, C.gold);
+      txt(mx ? 'MAX' : `◆ ${c}`, gx + cw - 14, y + 29, `900 24px ${DISP}`, mx ? C.cyan : ok ? C.gold : '#6a625b', 'right', 4);
     });
-    const x1 = gx * 2 + cw;
     RELICS.forEach((u, i) => {
-      const y = y0 + i * (rh + gap), sel = o.col === 1 && o.row === i, own = SV.own[u.id], ok = SV.ash >= u.cost, fl = o.flash && o.flash.k === 'r' + i ? o.flash.t / .6 : 0;
-      row(ctx, txt, o, 1, i, x1, y, cw, rh, sel, fl);
-      txt(u.name, x1 + 12, y + 19, `900 17px ${DISP}`, own ? '#f3ebe0' : '#c9bfb4', 'left', 3); txt(u.kind, x1 + 150, y + 19, `600 9px ${MONO}`, u.kind === 'WEAPON' ? C.gold : u.kind === 'RUNE' ? C.cyan : C.crimson, 'left', 2);
-      txt(u.d, x1 + 12, y + 36, `500 11px ${BODY}`, '#9a9289', 'left', 3);
-      txt(own ? 'OWNED' : `◆ ${u.cost}`, x1 + cw - 12, y + 27, `900 17px ${DISP}`, own ? C.cyan : ok ? C.gold : '#5a534d', 'right', 3);
+      const y = y0 + i * (rh + gap), sel = o.col === 1 && o.row === i, own = SV.own[u.id], ok = SV.ash >= u.cost;
+      row(ctx, txt, o, 1, i, x1, y, cw, rh, sel, o.flash && o.flash.k === 'r' + i ? o.flash.t / .6 : 0);
+      txt(u.name, x1 + 14, y + 29, `900 24px ${DISP}`, sel || own ? '#f3ebe0' : '#c9bfb4', 'left', 4);
+      txt(u.kind, x1 + 214, y + 26, `600 12px ${MONO}`, u.kind === 'WEAPON' ? C.gold : u.kind === 'RUNE' ? C.cyan : C.crimson, 'left', 3);
+      txt(own ? 'OWNED' : `◆ ${u.cost}`, x1 + cw - 14, y + 29, `900 24px ${DISP}`, own ? C.cyan : ok ? C.gold : '#6a625b', 'right', 4);
     });
     // waystone
-    let y = y0 + ROW_WAY * (rh + gap) + 6, sel = o.col === 1 && o.row === ROW_WAY;
-    row(ctx, txt, o, 1, ROW_WAY, x1, y, cw, rh, sel, 0);
+    let y = y0 + ROW_WAY * (rh + gap) + 8, sel = o.col === 1 && o.row === ROW_WAY;
     const si = Math.min(SV.start || 0, SV.way || 0), ch = CHS[si];
-    txt('START AT', x1 + 12, y + 19, `600 10px ${MONO}`, '#9a9289', 'left', 3);
-    txt(`‹  CHAPTER ${ch[0]} · ${ch[1]}  ›`, x1 + cw / 2 + 30, y + 22, `900 17px ${DISP}`, SV.way ? '#f3ebe0' : '#5a534d', 'center', 3);
-    txt(SV.way < 3 ? `WAYSTONES ${SV.way}/3 · SLAY ${CHS[SV.way + 1][3]} TO LIGHT THE NEXT` : 'EVERY WAYSTONE IS LIT', x1 + cw / 2 + 30, y + 37, `600 9px ${MONO}`, '#7d766f', 'center', 2);
+    row(ctx, txt, o, 1, ROW_WAY, x1, y, cw, 52, sel, 0);
+    txt('START AT', x1 + 14, y + 21, `600 12px ${MONO}`, '#9a9289', 'left', 3);
+    txt(`‹ CH. ${ch[0]} · ${ch[1]} ›`, x1 + cw - 14, y + 23, `900 22px ${DISP}`, SV.way ? '#f3ebe0' : '#6a625b', 'right', 4);
+    txt(SV.way < 3 ? `WAYSTONES ${SV.way}/3 · SLAY ${CHS[SV.way + 1][3]} FOR THE NEXT` : 'EVERY WAYSTONE IS LIT', x1 + 14, y + 43, `600 11px ${MONO}`, '#8a827a', 'left', 3);
     // refund
-    y += rh + gap; sel = o.col === 1 && o.row === ROW_REF;
-    row(ctx, txt, o, 1, ROW_REF, x1, y, cw, 30, sel, 0);
+    y += 52 + gap; sel = o.col === 1 && o.row === ROW_REF;
+    row(ctx, txt, o, 1, ROW_REF, x1, y, cw, 34, sel, 0);
     const back = BLESS.reduce((s, b) => s + paid(b, rank(b.id)), 0);
-    txt(o.refund ? `CONFIRM: REFUND ◆ ${back}` : `REFUND BLESSINGS · ◆ ${back} BACK`, x1 + cw / 2, y + 20, `600 11px ${MONO}`, o.refund ? C.crimson : '#9a9289', 'center', 3);
+    txt(o.refund ? `PRESS AGAIN: REFUND ◆ ${back}` : `REFUND BLESSINGS  ·  ◆ ${back} BACK`, x1 + cw / 2, y + 23, `600 14px ${MONO}`, o.refund ? C.crimson : '#b0a79e', 'center', 3);
     // descend
-    y += 30 + gap * 2; sel = o.col === 1 && o.row === ROW_GO;
-    rects.push({ col: 1, row: ROW_GO, x: x1, y, w: cw, h: 46 });
-    rrect(ctx, x1, y, cw, 46, 8); ctx.fillStyle = sel ? '#3a0d12' : '#1a0a0d'; if (sel) { ctx.shadowColor = C.crimson; ctx.shadowBlur = 22 + S(t * 6) * 6; } ctx.fill(); ctx.shadowBlur = 0;
-    ctx.strokeStyle = C.crimson; ctx.lineWidth = sel ? 2.5 : 1.2; ctx.stroke();
-    txt(si ? `DESCEND · CHAPTER ${ch[0]}` : 'DESCEND', x1 + cw / 2, y + 31, `900 24px ${DISP}`, '#f3ebe0', 'center', 4);
-    if (o.msg) { ctx.save(); ctx.globalAlpha *= clamp(o.msg.t * 3, 0, 1); txt(o.msg.s, W / 2, H - 38, `600 12px ${MONO}`, o.msg.col, 'center', 3); ctx.restore(); }
-    txt(`↑ ↓ ← →  CHOOSE     ENTER / ${keyLabel('attack')}  BUY     ${keyLabel('dash')} / BACKSPACE  DESCEND`, W / 2, H - 16, `600 11px ${MONO}`, '#6f675f', 'center', 3);
+    y += 34 + gap * 2; sel = o.col === 1 && o.row === ROW_GO;
+    const dh = y0 + 9 * (rh + gap) - gap - y;
+    rects.push({ col: 1, row: ROW_GO, x: x1, y, w: cw, h: dh });
+    rrect(ctx, x1, y, cw, dh, 8); ctx.fillStyle = sel ? '#3a0d12' : '#1a0a0d'; if (sel) { ctx.shadowColor = C.crimson; ctx.shadowBlur = 22 + S(t * 6) * 6; } ctx.fill(); ctx.shadowBlur = 0;
+    ctx.strokeStyle = C.crimson; ctx.lineWidth = sel ? 3 : 1.4; ctx.stroke();
+    txt(si ? `DESCEND · CHAPTER ${ch[0]}` : 'DESCEND', x1 + cw / 2, y + dh / 2 + 12, `900 34px ${DISP}`, '#f3ebe0', 'center', 5);
+    // the selected row, in words
+    const dy = y0 + 9 * (rh + gap) + 4, [dn, dd] = detail(o);
+    rrect(ctx, gx, dy, W - gx * 2, 54, 8); ctx.fillStyle = 'rgba(242,180,58,.07)'; ctx.fill();
+    if (o.msg) txt(o.msg.s, W / 2, dy + 34, `700 18px ${MONO}`, o.msg.col, 'center', 4);
+    else { txt(dn, gx + 16, dy + 22, `900 20px ${DISP}`, C.gold, 'left', 4); txt(dd, gx + 16, dy + 44, `500 17px ${BODY}`, '#e6ddd2', 'left', 4); }
+    txt(`ARROWS  CHOOSE     ENTER / ${keyLabel('attack')}  BUY     ${keyLabel('dash')}  DESCEND`, W / 2, H - 8, `600 13px ${MONO}`, '#8a827a', 'center', 3);
     ctx.restore();
   }
   return { load, begin, weaponDraw, ash, onKill, over, summary, open, step, draw, BLESS, RELICS, price, get save() { return SV; }, persist: save };
