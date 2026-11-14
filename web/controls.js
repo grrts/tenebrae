@@ -33,7 +33,7 @@ function keysLine() {
   const b = s => `<b>${s}</b>`;
   return `${b(keyLabel('left') + ' ' + keyLabel('right'))} or ${b('← →')} move · ${b(keysList('jump'))}${upJumps ? ' or ' + b(keyLabel('up')) : ''} jump · ` +
     `${b(keysList('attack'))} attack (hold to keep swinging) · ${b(keysList('dash'))} dash · ${b(keysList('skill'))} weapon skill when the meter is full · ${b(keyLabel('down'))} + attack in air: slam · ` +
-    `${b(keyLabel('down'))} + jump: drop · ${b('TAB')} the Codex · ${b('ESC')} pause and rebind · controller works too`;
+    `${b(keyLabel('down'))} + jump: drop · ${b('TAB')} the Codex · ${b('ESC')} pause, options and rebind · controller works too`;
 }
 
 const held = new Set(), tapped = new Set(), swallow = new Set(), IN = {}, PR = {}, prevIN = {};
@@ -98,9 +98,20 @@ function mouseSide(st, px, W) {
   return MOUSE.x * W > (px - st.cam.x) * ZM + W / 2 ? 1 : -1;
 }
 
-/* pause menu and the controls page, drawn over the arena */
+/* options shared with the story and the arena, saved per browser */
+const OPTS = (() => {
+  let o = {}; try { o = JSON.parse(store('wickbearer.opts') || '{}') || {}; } catch (e) { o = {}; }
+  o = Object.assign({ text: 1, undying: false }, o);
+  if (![1, 1.25, 1.5].includes(o.text)) o.text = 1; o.undying = !!o.undying;
+  return o;
+})();
+const saveOpts = () => store('wickbearer.opts', JSON.stringify(OPTS));
+
+/* pause menu, the controls page and the options page, drawn over the arena */
 const CTRL = (() => {
-  const PAUSE = ['RESUME', 'CONTROLS', 'RESTART RUN'];
+  const PAUSE = ['RESUME', 'CONTROLS', 'OPTIONS', 'RESTART RUN'];
+  const OPT_ROWS = [['text', 'SUBTITLE SIZE'], ['undying', 'UNDYING · HP NEVER DROPS BELOW 1'], ['back', 'BACK']];
+  const cycleText = d => { const v = [1, 1.25, 1.5], i = v.indexOf(OPTS.text); OPTS.text = v[(i + v.length + d) % v.length]; saveOpts(); };
   const ROWS = [['left', 'MOVE LEFT'], ['right', 'MOVE RIGHT'], ['up', 'UP'], ['down', 'DOWN · DROP, SLAM'], ['jump', 'JUMP'], ['attack', 'ATTACK'], ['dash', 'DASH'], ['skill', 'WEAPON SKILL'],
     ['upjump', 'UP ALSO JUMPS'], ['reset', 'RESET TO DEFAULTS'], ['back', 'BACK']];
   const api = { menu: null };
@@ -131,15 +142,25 @@ const CTRL = (() => {
       }
       clearPR(); return false;
     }
-    const list = m.page === 'pause' ? PAUSE : ROWS, n = list.length;
+    const list = m.page === 'pause' ? PAUSE : m.page === 'options' ? OPT_ROWS : ROWS, n = list.length;
     if (PR.up || PR.left && m.page === 'pause') m.sel = (m.sel + n - 1) % n;
     if (PR.down || PR.right && m.page === 'pause') m.sel = (m.sel + 1) % n;
+    if (m.page === 'options' && OPT_ROWS[m.sel][0] === 'text' && (PR.left || PR.right)) cycleText(PR.left ? -1 : 1);
     if (m.page === 'pause') {
       if (PR.pause || PR.back) api.resume();
       else if (PR.ok && m.t > .15) {
         if (m.sel === 0) api.resume();
         else if (m.sel === 1) { m.page = 'controls'; m.sel = 0; }
+        else if (m.sel === 2) { m.page = 'options'; m.sel = 0; }
         else { st.cut = null; st.cutPend = 0; newRun(st); api.resume(); }
+      }
+    } else if (m.page === 'options') {
+      if (PR.pause || PR.back) { m.page = 'pause'; m.sel = 2; }
+      else if (PR.ok && m.t > .15) {
+        const id = OPT_ROWS[m.sel][0];
+        if (id === 'text') cycleText(1);
+        else if (id === 'undying') { OPTS.undying = !OPTS.undying; saveOpts(); if (OPTS.undying) st.undyingUsed = true; }
+        else { m.page = 'pause'; m.sel = 2; }
       }
     } else {
       if (PR.pause || PR.back) { m.page = 'pause'; m.sel = 1; }
@@ -164,6 +185,19 @@ const CTRL = (() => {
         if (sel) { ctx.fillStyle = 'rgba(229,56,59,.22)'; ctx.fillRect(W / 2 - 150, y - 26, 300, 36); ctx.fillStyle = C.crimson; ctx.fillRect(W / 2 - 150, y - 26, 3, 36); }
         txt(s, W / 2, y, 18, sel ? '#f3ebe0' : '#9a9289'); });
       txt(`↑ ↓  CHOOSE     ENTER / ${keyLabel('attack')}  SELECT     ESC  RESUME`, W / 2, H - 30, 11, '#6f675f');
+    } else if (m.page === 'options') {
+      txt('OPTIONS', W / 2, 74, 32, '#f3ebe0');
+      txt('SAVED IN THIS BROWSER', W / 2, 100, 11, '#9a9289');
+      OPT_ROWS.forEach(([id, name], i) => { const y = 160 + i * 40, sel = i === m.sel, x0 = W / 2 - 300;
+        if (sel) { ctx.fillStyle = 'rgba(229,56,59,.22)'; ctx.fillRect(x0, y - 23, 600, 32); ctx.fillStyle = C.crimson; ctx.fillRect(x0, y - 23, 3, 32); }
+        txt(name, x0 + 18, y, 15, sel ? '#f3ebe0' : '#9a9289', 'left');
+        const v = id === 'text' ? `${Math.round(OPTS.text * 100)}%` : id === 'undying' ? (OPTS.undying ? 'ON' : 'OFF') : '';
+        txt(v, x0 + 582, y, 15, sel ? C.gold : '#f3ebe0', 'right'); });
+      txt('Undying is an assist: you still take hits, but you never fall.', W / 2, 160 + OPT_ROWS.length * 40 + 20, 12, '#7d766f');
+      // a sample line so the size can be judged without a cutscene
+      ctx.font = `italic 500 ${Math.round(23 * OPTS.text)}px "Cormorant Garamond", Georgia, serif`; ctx.textAlign = 'center'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.9)'; ctx.fillStyle = '#f3ebe0';
+      ctx.strokeText('Fifteen candles hold back the Hush.', W / 2, H - 92); ctx.fillText('Fifteen candles hold back the Hush.', W / 2, H - 92);
+      txt(`↑ ↓  CHOOSE     ← → / ENTER  CHANGE     ESC  BACK`, W / 2, H - 30, 11, '#6f675f');
     } else {
       txt('CONTROLS', W / 2, 74, 32, '#f3ebe0');
       txt('KEYBOARD AND MOUSE · SAVED IN THIS BROWSER · A CONTROLLER ALWAYS WORKS', W / 2, 100, 11, '#9a9289');

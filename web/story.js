@@ -399,7 +399,7 @@ const STORY = (() => {
     c.t += rdt; c.T += rdt;
     const pad = (navigator.getGamepads ? [...navigator.getGamepads()] : []).find(g => g), start = pad && pad.buttons[9] && pad.buttons[9].pressed;
     if (skipAll || (start && c.T > .5)) { finish(st); return false; }
-    if (c.t >= shot.d || ((PR.jump || PR.attack || tap) && c.t > .45)) { c.i++; c.t = 0; if (c.i >= shots.length) { finish(st); return false; } shot = shots[c.i]; }
+    if (c.t >= shot.d * OPTS.text || ((PR.jump || PR.attack || tap) && c.t > .45)) { c.i++; c.t = 0; if (c.i >= shots.length) { finish(st); return false; } shot = shots[c.i]; }
     tap = false;
     const t = c.t;
     ctx.save();
@@ -414,12 +414,12 @@ const STORY = (() => {
     if (shot.say) {
       const [who, line] = shot.say, n = Math.floor(Math.max(0, t - .2) * 48), s = line.slice(0, n);
       ctx.save(); ctx.textAlign = 'center';
-      if (who) { ctx.font = `600 11px ${MONO}`; ctx.fillStyle = who === 'SAINT UMBER' ? C.violet : C.gold; spaced(ctx, who, W / 2, H - 112, 4); }
-      ctx.font = `${who ? 'normal' : 'italic'} 500 23px ${ITAL}`; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.9)'; ctx.fillStyle = '#f3ebe0'; ctx.textAlign = 'center';
+      const ts = OPTS.text; ctx.font = `${who ? 'normal' : 'italic'} 500 ${Math.round(23 * ts)}px ${ITAL}`; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.9)'; ctx.fillStyle = '#f3ebe0'; ctx.textAlign = 'center';
       const words = s.split(' '), lines = []; let cur = '';
       for (const w of words) { const tt = cur ? cur + ' ' + w : w; if (ctx.measureText(tt).width > 780 && cur) { lines.push(cur); cur = w; } else cur = tt; }
-      lines.push(cur); const y0 = H - 82 + (lines.length > 1 ? -10 : 0);
-      lines.forEach((l, i) => { ctx.strokeText(l, W / 2, y0 + i * 26); ctx.fillText(l, W / 2, y0 + i * 26); });
+      lines.push(cur); const lh = 26 * ts, y0 = H - 82 - (lines.length - 1) * lh * .5 - (ts - 1) * 24;
+      lines.forEach((l, i) => { ctx.strokeText(l, W / 2, y0 + i * lh); ctx.fillText(l, W / 2, y0 + i * lh); });
+      if (who) { ctx.font = `600 ${Math.round(11 * ts)}px ${MONO}`; ctx.fillStyle = who === 'SAINT UMBER' ? C.violet : C.gold; spaced(ctx, who, W / 2, y0 - 30 * ts, 4); }
       ctx.restore();
     }
     ctx.save(); ctx.font = `600 10px ${MONO}`; ctx.textAlign = 'right'; ctx.fillStyle = 'rgba(160,150,140,.75)'; ctx.fillText('J / CLICK  NEXT     ESC  SKIP', W - 16, 22); ctx.restore();

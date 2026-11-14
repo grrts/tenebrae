@@ -149,6 +149,11 @@ page = head + r'''<style>
 ''' + script
 open('tenebrae-play.html', 'w').write(page)
 print('ok', len(page))
+# getting hit resets the flow and lands with shake and hit-stop (a comment in the pitch page swallowed these)
+page = page.replace("so it reaches the boss kill st.flow = 0; st.shake = .16; st.hitstop = .06;",
+    "so it reaches the boss kill\n    st.flow = 0; st.shake = .16; st.hitstop = .06;\n    if (OPTS.undying && st.hp < 1) { st.hp = 1; st.undyingUsed = true; }", 1)
+assert 'OPTS.undying && st.hp < 1' in page, 'build_play: hit line not found'
+open('tenebrae-play.html', 'w').write(page)
 exec(open('build_story.py').read())
 exec(open('build_content.py').read())
 exec(open('build_ai.py').read())
