@@ -73,6 +73,7 @@ var revived := false
 var regen_k := 0
 var ash_frac := 0.0
 var start_bosses := 0
+var start_wax := 0
 var free_drafts := 0
 var lit_waystone := 0
 var bot: BalanceBot = null ## set by --balance
@@ -421,6 +422,8 @@ func _begin() -> void:
 	regen_k = 0
 	ash_frac = 0.0
 	start_bosses = 0
+	run_wax = bless_val("purse")
+	start_wax = run_wax
 	free_drafts = 1 if "spare_rune" in relics else 0
 	var ch := mini(start_ch, waystone)
 	if ch > 0 and not smoke:
@@ -1036,7 +1039,7 @@ func _step_pickups(dt: float) -> void:
 		pk.t += dt
 		var v: Vector2 = pk.vel
 		var d: Vector2 = target - pk.pos
-		if pk.t > 0.35 and d.length() < 220:
+		if pk.t > 0.35 and d.length() < 220 * (1.0 + bless_val("magnet") / 100.0):
 			v = v.lerp(d.normalized() * 900, minf(1, dt * 8))
 		else:
 			v.y += 1400 * dt
@@ -1334,7 +1337,7 @@ func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 		fx.spark(e.position + Vector2(e.facing * 16, -30))
 	if not skill_hit and weapon != "":
 		var was_ready := skill_meter >= 1.0
-		skill_meter = minf(1.0, skill_meter + (0.05 if e == boss else 0.07))
+		skill_meter = minf(1.0, skill_meter + (0.05 if e == boss else 0.07) * (1.0 + bless_val("charge") / 100.0))
 		if not was_ready and skill_meter >= 1.0:
 			hud.show_banner("%s READY" % RunData.SKILLS[weapon].name, "PRESS %s" % hud.btn("skill"), 1.0)
 	e.hp -= dmg * damage_mul() * guard * (1.6 if e == boss and has_rune("TALLOW CROWN") else 1.0)
@@ -1413,7 +1416,8 @@ func _end_run() -> void:
 	Engine.time_scale = opt_speed
 	_log_run()
 	var keep_pct := bless_val("keep")
-	var kept := (run_wax if won else roundi(run_wax * keep_pct / 100.0)) + (bosses - start_bosses) * 50
+	var earned_run := maxi(0, run_wax - start_wax)
+	var kept := (earned_run if won else roundi(earned_run * keep_pct / 100.0)) + (bosses - start_bosses) * 50
 	var before := earned
 	bank += kept
 	earned += kept

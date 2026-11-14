@@ -441,18 +441,27 @@ func _paint_reliquary(vp: Vector2) -> void:
 	var y0 := 130.0
 	_text("BLESSINGS · RANKED, PERMANENT", Vector2(xs[0], y0 - 8), 14, Color(0.6, 0.57, 0.54))
 	_text("RELICS · ONE-TIME UNLOCKS", Vector2(xs[1], y0 - 8), 14, Color(0.6, 0.57, 0.54))
-	for i in RunData.BLESSINGS.size():
+	# the blessings list scrolls: 9 rows show, the rest follow the cursor
+	var vis := 9
+	var nb := RunData.BLESSINGS.size()
+	var sc0: int = clampi(r.get("scroll", 0), 0, maxi(0, nb - vis))
+	if col == 0 and r.pick < nb:
+		sc0 = clampi(sc0, r.pick - vis + 1, r.pick)
+	r.scroll = sc0
+	if nb > vis:
+		_text("%s%s  %d-%d OF %d" % ["^" if sc0 > 0 else " ", "v" if sc0 + vis < nb else " ", sc0 + 1, sc0 + vis, nb], Vector2(xs[0] + cw - 140, y0 - 8), 14, gold)
+	for i in range(sc0, mini(nb, sc0 + vis)):
 		var b: Dictionary = RunData.BLESSINGS[i]
 		var rk := game.rank(b.id)
 		var mx := RunData.blessing_max(b)
 		var at_max := rk >= mx
 		var cost := 0 if at_max else RunData.blessing_price(b, rk)
-		var y := y0 + i * (rh + 4)
+		var y := y0 + (i - sc0) * (rh + 4)
 		_rel_box(xs[0], y, cw, rh, col == 0 and r.pick == i)
 		_text(b.name, Vector2(xs[0] + 12, y + 20), 19, Color("#f3ebe0") if rk > 0 else Color(0.78, 0.74, 0.7))
 		for k in mx:
 			canvas.draw_rect(Rect2(xs[0] + 170 + k * 15, y + 8, 11, 11), gold if k < rk else Color(1, 1, 1, 0.12))
-		var desc: String = (b.fmt % b.vals[rk]) if at_max else ((b.fmt % b.vals[rk]) + "  >  " + (b.fmt % b.vals[rk + 1]) if rk > 0 else b.fmt % b.vals[1])
+		var desc: String = (b.fmt % b.vals[rk]) if at_max else ("NEXT: " + (b.fmt % b.vals[rk + 1]) if rk > 0 else b.fmt % b.vals[1])
 		_text(desc, Vector2(xs[0] + 12, y + 39), 14, Color(0.7, 0.66, 0.62))
 		_text("MAX" if at_max else "%d ASH" % cost, Vector2(xs[0] + cw - 100, y + 28), 18, Color("#3fd6c4") if at_max else (gold if game.bank >= cost else Color(0.45, 0.42, 0.4)))
 	for i in RunData.RELICS.size():
@@ -466,7 +475,7 @@ func _paint_reliquary(vp: Vector2) -> void:
 		_text(rel.desc, Vector2(xs[1] + 12, y + 39), 14, Color(0.7, 0.66, 0.62) if not owned else Color(0.5, 0.47, 0.45))
 		_text("OWNED" if owned else "%d ASH" % rel.cost, Vector2(xs[1] + cw - 100, y + 28), 18, Color("#3fd6c4") if owned else (gold if can else Color(0.45, 0.42, 0.4)))
 	# the bottom row: waystone and refund
-	var yb := y0 + maxi(RunData.BLESSINGS.size(), RunData.RELICS.size()) * (rh + 4) + 6
+	var yb := y0 + maxi(vis, RunData.RELICS.size()) * (rh + 4) + 6
 	var sc := mini(game.start_ch, game.waystone)
 	var names := ["THE PIT OF PSALMS", "THE DROWNED WELL", "THE BLADEWORKS", "THE HOLLOW THRONE"]
 	var bosses := ["THE CHAIN WARDEN", "THE HOLLOW KING", "THE ASHEN JARL"]

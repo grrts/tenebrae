@@ -2851,12 +2851,16 @@ const META = (() => {
   const BLESS = [
     { id: 'might', name: 'MIGHT', max: 5, cost: 80, d: r => `All damage +${r * 10}%.` },
     { id: 'vital', name: 'VITALITY', max: 3, cost: 110, d: r => `+${r * 20} max HP.` },
+    { id: 'ward', name: 'WARD', max: 3, cost: 100, d: r => `${r * 8}% chance to shrug off a hit.` },
     { id: 'mend', name: 'RECOVERY', max: 3, cost: 100, d: r => `Restore 20 HP every ${[0, 40, 30, 20][r]} kills.` },
     { id: 'swift', name: 'SWIFTNESS', max: 3, cost: 70, d: r => `Move ${r * 7}% faster.` },
     { id: 'fleet', name: 'FLEETFOOT', max: 2, cost: 90, d: r => `Dash cooldown -${r * 15}%.` },
+    { id: 'charge', name: 'CHARGE', max: 3, cost: 80, d: r => `Your weapon skill charges ${r * 15}% faster.` },
     { id: 'growth', name: 'GROWTH', max: 3, cost: 90, d: r => `Levels need ${r * 10}% less ash: more runes.` },
     { id: 'greed', name: 'GREED', max: 4, cost: 70, d: r => `Every ash pickup is worth ${r * 15}% more.` },
+    { id: 'magnet', name: 'MAGNET', max: 3, cost: 60, d: r => `Ash flies to you from ${r * 30}% further away.` },
     { id: 'keep', name: 'KEEPSAKE', max: 3, cost: 90, d: r => `Keep ${40 + r * 10}% of your ash when you die.` },
+    { id: 'purse', name: 'PROVISIONS', max: 3, cost: 70, d: r => `Start every run with ${r * 40} ash for the Shade Merchant.` },
     { id: 'spare', name: 'SPARE CANDLE', max: 1, cost: 600, d: r => r ? 'The hidden candle brings you back twice.' : 'The hidden candle brings you back once.' },
   ];
   const RELICS = [
@@ -2884,7 +2888,9 @@ const META = (() => {
   function begin(st) {
     const m = st.meta = SV;
     st.baseHp = 5 + rank('vital'); st.maxHp = st.hp = st.baseHp;
-    st.mods = { dmg: 1 + rank('might') * .1, spd: 1 + rank('swift') * .07, dash: 1 - rank('fleet') * .15, xp: 1 - rank('growth') * .1, ash: 1 + rank('greed') * .15 };
+    st.mods = { dmg: 1 + rank('might') * .1, spd: 1 + rank('swift') * .07, dash: 1 - rank('fleet') * .15, xp: 1 - rank('growth') * .1, ash: 1 + rank('greed') * .15,
+      ward: rank('ward') * .08, magnet: 1 + rank('magnet') * .3, charge: 1 + rank('charge') * .15 };
+    st.runWax = st.startWax = rank('purse') * 40;
     st.regenN = [0, 40, 30, 20][rank('mend')]; st.regenK = 0; st.ashFrac = 0;
     st.spare = rank('spare'); st.freeDrafts = m.own.rune0 ? 1 : 0; st.startBosses = 0;
     // a lit waystone: start at a later chapter, with the levels and temper a run would have by then
@@ -2913,7 +2919,7 @@ const META = (() => {
   /* ---------- the run ends: bank the ash ---------- */
   function over(st) {
     const keep = .4 + rank('keep') * .1, bosses = st.bosses - (st.startBosses || 0);
-    const kept = st.victory ? st.runWax + bosses * 50 : Math.round(st.runWax * keep) + bosses * 50;
+    const earned = Math.max(0, st.runWax - (st.startWax || 0)), kept = st.victory ? earned + bosses * 50 : Math.round(earned * keep) + bosses * 50;
     const from = SV.ash; SV.ash += kept; SV.runs++; if (st.victory) SV.dawns++;
     const newBest = st.depth > SV.best; SV.best = Math.max(SV.best, st.depth); save();
     st.ov = { kind: 'over', t: 0, dur: 30, victory: !!st.victory, run: st.run, seed: st.seed, depth: st.depth, best: SV.best, newBest, time: st.rt, bosses: st.bosses, kills: st.kills,
@@ -2991,12 +2997,14 @@ const META = (() => {
     if (PR.down) { o.row = (o.row + 1) % n; o.refund = 0; }
     if (o.col === 1 && o.row === ROW_WAY && (PR.left || PR.right)) turnWay(o, PR.left ? -1 : 1);
     else if (PR.left || PR.right) { o.col = 1 - o.col; o.row = Math.min(o.row, (o.col ? ROW_GO + 1 : BLESS.length) - 1); o.refund = 0; }
+    if (mouse.wheel) { o.col = 0; o.row = clamp(o.row + mouse.wheel, 0, BLESS.length - 1); mouse.wheel = 0; }
     if (mouse.moved) { mouse.moved = false; const h = rects.find(r => mouse.x >= r.x && mouse.x <= r.x + r.w && mouse.y >= r.y && mouse.y <= r.y + r.h); if (h) { o.col = h.col; o.row = h.row; } }
     if (PR.ok) act(st, o);
     else if (PR.back || PR.dash) close(st);
     if (st.ov === o) sync(o);
   }
-  const mouse = { x: 0, y: 0, moved: false };
+  const mouse = { x: 0, y: 0, moved: false, wheel: 0 };
+  addEventListener('wheel', e => { if (WB && WB.ov && WB.ov.kind === 'relic') mouse.wheel += Math.sign(e.deltaY); }, { passive: true });
   addEventListener('mousemove', e => {
     cv = cv || document.getElementById('cv-demo'); if (!cv) return; const b = cv.getBoundingClientRect();
     mouse.x = (e.clientX - b.left) / b.width * lastW; mouse.y = (e.clientY - b.top) / b.height * lastH; mouse.moved = true;
@@ -3027,8 +3035,12 @@ const META = (() => {
     const gx = 18, cw = (W - gx * 3) / 2, y0 = 116, rh = 40, gap = 4, x1 = gx * 2 + cw;
     txt('BLESSINGS · STAT UPGRADES', gx + 2, y0 - 9, `600 13px ${MONO}`, C.gold, 'left', 3);
     txt('RELICS · UNLOCKS', x1 + 2, y0 - 9, `600 13px ${MONO}`, C.cyan, 'left', 3);
+    const VIS = 9; o.scroll = clamp(o.scroll || 0, 0, BLESS.length - VIS);
+    if (o.col === 0) o.scroll = clamp(o.scroll, o.row - VIS + 1, o.row);
+    txt(`${o.scroll > 0 ? '▲' : ' '}${o.scroll + VIS < BLESS.length ? '▼' : ' '}  ${o.scroll + 1}-${o.scroll + VIS} OF ${BLESS.length}`, gx + cw - 6, y0 - 9, `600 12px ${MONO}`, C.gold, 'right', 3);
     BLESS.forEach((b, i) => {
-      const y = y0 + i * (rh + gap), r = rank(b.id), sel = o.col === 0 && o.row === i, mx = r >= b.max, c = mx ? 0 : price(b, r), ok = !mx && SV.ash >= c;
+      if (i < o.scroll || i >= o.scroll + VIS) return;
+      const y = y0 + (i - o.scroll) * (rh + gap), r = rank(b.id), sel = o.col === 0 && o.row === i, mx = r >= b.max, c = mx ? 0 : price(b, r), ok = !mx && SV.ash >= c;
       row(ctx, txt, o, 0, i, gx, y, cw, rh, sel, o.flash && o.flash.k === 'b' + i ? o.flash.t / .6 : 0);
       txt(b.name, gx + 14, y + 29, `900 24px ${DISP}`, sel || r ? '#f3ebe0' : '#c9bfb4', 'left', 4); pips(ctx, gx + 196, y + 20, r, b.max, C.gold);
       txt(mx ? 'MAX' : `◆ ${c}`, gx + cw - 14, y + 29, `900 24px ${DISP}`, mx ? C.cyan : ok ? C.gold : '#6a625b', 'right', 4);
@@ -3262,6 +3274,7 @@ function arenaSim(ctx, rdt, r) {
   const addFlow = () => { st.flow = Math.min(30, st.flow + 1); st.flowT = 2.4; };
   const hitPlayer = n => {
     if (p.hurt > 0 || p.dash > 0 || st.dying || st.ov) return;
+    if (st.mods.ward && Math.random() < st.mods.ward) { p.hurt = .6; st.rings.push({ x: p.x, y: p.y - 28, t: 0, kind: 'veil' }); st.N.push({ x: p.x, y: p.y - 74, v: 'WARDED', life: .9, crit: true, col: C.gold }); return; }
     if (has(st, 'IRON VEIL') && st.veilT <= 0) { st.veilT = 10; p.hurt = .5; st.rings.push({ x: p.x, y: p.y - 28, t: 0, kind: 'veil' }); return; }
     st.hp -= n; p.hurt = st.run === 47 ? 2.2 : 1.6; // the first run a visitor sees is a little kinder, so it reaches the boss kill st.flow = 0; st.shake = .16; st.hitstop = .06;
     st.N.push({ x: p.x, y: p.y - 74, v: `-${n * 20} HP`, life: .9, crit: true, col: C.crimson });
@@ -3299,7 +3312,7 @@ function arenaSim(ctx, rdt, r) {
     if (e.dead) return;
     dmg = (dmg * (glass ? 2 : 1) + st.temper + (crit && has(st, 'WHETSTONE') ? 1 : 0)) * st.mods.dmg;
     e.hp -= dmg; e.hit = .12;
-    if (!st.skilling) { const was = st.skill >= 1; st.skill = Math.min(1, (st.skill || 0) + (e.type === 'boss' ? .05 : .07));
+    if (!st.skilling) { const was = st.skill >= 1; st.skill = Math.min(1, (st.skill || 0) + (e.type === 'boss' ? .05 : .07) * st.mods.charge);
       if (!was && st.skill >= 1) st.banner = { text: SKILL_NAMES[st.weapon] + ' READY', sub: `PRESS ${keyLabel('skill')} OR Y`, t: 1, col: C.gold }; }
     if (e.type === 'boss') e.vx += kx * .05; else { e.vx = kx; if (ky) { e.vy = ky; e.ground = false; } }
     addFlow(); st.hitstop = Math.max(st.hitstop, .05);
@@ -3495,7 +3508,7 @@ function arenaSim(ctx, rdt, r) {
     /* ash drops: run currency and XP */
     for (const g of st.G) {
       g.t += dt; const dx = p.x - g.x, dy = (p.y - 28) - g.y, d = Math.hypot(dx, dy) || 1;
-      if (g.t > .35 && d < 220 && !st.dying) { g.vx = dx / d * 560; g.vy = dy / d * 560; } else g.vy += GRV * .6 * dt;
+      if (g.t > .35 && d < 220 * st.mods.magnet && !st.dying) { g.vx = dx / d * 560; g.vy = dy / d * 560; } else g.vy += GRV * .6 * dt;
       g.x += g.vx * dt; g.y += g.vy * dt; const gr = Math.floor((g.y + 6) / TS); if (g.vy > 0 && (isSolid(DA, Math.floor(g.x / TS), gr) || isOne(DA, Math.floor(g.x / TS), gr)) && g.t < .35) { g.y = gr * TS - 6; g.vy = 0; g.vx *= .5; }
       if (d < 18 && !st.dying) { g.got = 1; st.runWax += META.ash(st, has(st, 'HUNGER') ? 3 : 2); st.xp++;
         emit(st.P, { x: g.x, y: g.y, vx: rnd(-40, 40), vy: rnd(-60, -20), r: 2, col: C.cyan, glow: 8, life: .3 });

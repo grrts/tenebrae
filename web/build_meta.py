@@ -62,6 +62,11 @@ def _meta_build():
     rep("st.runWax += has(st, 'HUNGER') ? 3 : 2; st.xp++;", "st.runWax += META.ash(st, has(st, 'HUNGER') ? 3 : 2); st.xp++;")
     rep("const need = 8 + st.lvl * 5", "const need = Math.max(4, Math.round((8 + st.lvl * 5) * st.mods.xp))", 2)
     rep("    e.dead = true; st.kills++;\n", "    e.dead = true; st.kills++; META.onKill(st, e);\n")
+    # ward: a chance to shrug a hit off; magnet: ash flies in from further; charge: the skill meter fills faster
+    rep("    if (p.hurt > 0 || p.dash > 0 || st.dying || st.ov) return;\n",
+        "    if (p.hurt > 0 || p.dash > 0 || st.dying || st.ov) return;\n    if (st.mods.ward && Math.random() < st.mods.ward) { p.hurt = .6; st.rings.push({ x: p.x, y: p.y - 28, t: 0, kind: 'veil' }); st.N.push({ x: p.x, y: p.y - 74, v: 'WARDED', life: .9, crit: true, col: C.gold }); return; }\n")
+    rep("if (g.t > .35 && d < 220 && !st.dying)", "if (g.t > .35 && d < 220 * st.mods.magnet && !st.dying)")
+    rep("st.skill = Math.min(1, (st.skill || 0) + (e.type === 'boss' ? .05 : .07));", "st.skill = Math.min(1, (st.skill || 0) + (e.type === 'boss' ? .05 : .07) * st.mods.charge);")
     # the spare candle: the hidden candle comes back one more time
     rep("st.hidden = false; st.hp = Math.ceil(st.maxHp / 2);", "st.hidden = st.spare-- > 0; st.hp = Math.ceil(st.maxHp / 2);")
     rep("sub: 'RETURNED ONCE · IT WILL NOT RETURN AGAIN'", "sub: st.hidden ? 'THE SPARE CANDLE STILL BURNS · ONE MORE RETURN' : 'RETURNED ONCE · IT WILL NOT RETURN AGAIN'")

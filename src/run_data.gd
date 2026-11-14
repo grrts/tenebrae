@@ -56,12 +56,16 @@ const RELICS := [
 const BLESSINGS := [
 	{"id": "might", "name": "MIGHT", "cost": 80, "vals": [0, 10, 20, 30, 40, 50], "fmt": "All damage +%d%%."},
 	{"id": "vital", "name": "VITALITY", "cost": 110, "vals": [0, 20, 40, 60], "fmt": "+%d max HP."},
+	{"id": "ward", "name": "WARD", "cost": 100, "vals": [0, 8, 16, 24], "fmt": "%d%% chance to shrug off a hit."},
 	{"id": "mend", "name": "RECOVERY", "cost": 100, "vals": [0, 40, 30, 20], "fmt": "Restore 20 HP every %d kills."},
 	{"id": "swift", "name": "SWIFTNESS", "cost": 70, "vals": [0, 7, 14, 21], "fmt": "Move %d%% faster."},
 	{"id": "fleet", "name": "FLEETFOOT", "cost": 90, "vals": [0, 15, 30], "fmt": "Dash cooldown -%d%%."},
+	{"id": "charge", "name": "CHARGE", "cost": 80, "vals": [0, 15, 30, 45], "fmt": "Your weapon skill charges %d%% faster."},
 	{"id": "growth", "name": "GROWTH", "cost": 90, "vals": [0, 10, 20, 30], "fmt": "Levels need %d%% less ash: more runes."},
 	{"id": "greed", "name": "GREED", "cost": 70, "vals": [0, 15, 30, 45, 60], "fmt": "Every ash pickup is worth %d%% more."},
+	{"id": "magnet", "name": "MAGNET", "cost": 60, "vals": [0, 30, 60, 90], "fmt": "Ash flies to you from %d%% further away."},
 	{"id": "keep", "name": "KEEPSAKE", "cost": 90, "vals": [40, 50, 60, 70], "fmt": "Keep %d%% of your ash when you die."},
+	{"id": "purse", "name": "PROVISIONS", "cost": 70, "vals": [0, 40, 80, 120], "fmt": "Start every run with %d ash for the Shade Merchant."},
 	{"id": "spare", "name": "SPARE CANDLE", "cost": 600, "vals": [1, 2], "fmt": "The hidden candle can bring you back %d times."},
 ]
 
