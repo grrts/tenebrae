@@ -63,6 +63,19 @@ var achieved: Array = []
 # Codex entry ids unlocked by play (see Codex)
 var codex: Array = []
 var relics: Array = []
+# Reliquary blessings: id -> rank. Waystones lit (0-3): beating chapter i's boss lets a run start at chapter i + 1.
+var ranks := {}
+var waystone := 0
+var start_ch := 0
+# per run, from the blessings
+var spare_candles := 0
+var revived := false
+var regen_k := 0
+var ash_frac := 0.0
+var start_bosses := 0
+var start_wax := 0
+var free_drafts := 0
+var lit_waystone := 0
 var bot: BalanceBot = null ## set by --balance
 var skill_meter := 0.0 ## 0..1, full = the weapon skill is ready
 var skill_hit := false ## true while a skill's own hits land, so they don't refill the meter
@@ -250,6 +263,14 @@ func _smoke(dt: float) -> void:
 					if buy_relic(i):
 						bought += 1
 				print("smoke test: reliquary bought %d relics" % bought)
+				bank += 20000
+				var ranks_bought := 0
+				for i in RunData.BLESSINGS.size():
+					while buy_blessing(i):
+						ranks_bought += 1
+				var dm := damage_mul()
+				var refunded := refund_blessings()
+				print("smoke test: blessings bought %d ranks, damage x%.2f, refunded %d" % [ranks_bought, dm, refunded])
 				# a save damaged mid-write must come back from the backup
 				_save_meta()
 				_save_meta()
@@ -392,8 +413,77 @@ func _begin() -> void:
 		player.max_hp += 2
 	if "ashen_skin" in relics:
 		player.max_hp += 1
+	player.max_hp += rank("vital")
 	player.hp = player.max_hp
+	player.run_speed *= 1.0 + bless_val("swift") / 100.0
+	player.dash_cooldown *= 1.0 - bless_val("fleet") / 100.0
+	spare_candles = rank("spare")
+	revived = false
+	regen_k = 0
+	ash_frac = 0.0
+	start_bosses = 0
+	run_wax = bless_val("purse")
+	start_wax = run_wax
+	free_drafts = 1 if "spare_rune" in relics else 0
+	var ch := mini(start_ch, waystone)
+	if ch > 0 and not smoke:
+		# a lit waystone: start at that chapter with the levels and temper a run would have by then
+		depth = ch * 4 + 1
+		bosses = ch
+		start_bosses = ch
+		lvl = 1 + ch * 3
+		temper = ch
+		free_drafts += ch * 2
+		_load_arena(Story.CHAPTERS[ch].map)
+		learn("place_%d" % ch)
+		_play_once("intro%d" % ch, Story.INTROS[ch], _weapon_draw)
+		return
 	_play_once("prologue", Story.PROLOGUE, _weapon_draw)
+
+
+func rank(id: String) -> int:
+	return int(ranks.get(id, 0))
+
+
+## A blessing's value at its current rank (a percent, an HP amount or a kill count, see RunData.BLESSINGS).
+func bless_val(id: String) -> int:
+	for b in RunData.BLESSINGS:
+		if b.id == id:
+			return b.vals[mini(rank(id), RunData.blessing_max(b))]
+	return 0
+
+
+## Buys the next rank of blessing i if the bank allows. Returns true on a purchase.
+func buy_blessing(i: int) -> bool:
+	var b: Dictionary = RunData.BLESSINGS[i]
+	var r := rank(b.id)
+	if r >= RunData.blessing_max(b):
+		return false
+	var c := RunData.blessing_price(b, r)
+	if bank < c:
+		return false
+	bank -= c
+	ranks[b.id] = r + 1
+	_save_meta()
+	return true
+
+
+## Gives back every bit of ash spent on blessings. Relics stay. Returns the ash refunded.
+func refund_blessings() -> int:
+	var back := 0
+	for b in RunData.BLESSINGS:
+		back += RunData.blessing_paid(b, rank(b.id))
+	bank += back
+	ranks.clear()
+	_save_meta()
+	return back
+
+
+func blessings_refund_value() -> int:
+	var back := 0
+	for b in RunData.BLESSINGS:
+		back += RunData.blessing_paid(b, rank(b.id))
+	return back
 
 
 func open_pause() -> void:
@@ -578,8 +668,9 @@ func _weapon_draw() -> void:
 
 func _pick_weapon(o: Dictionary) -> void:
 	_equip(o.id)
-	hud.show_banner("DEPTH I", "%s · %s" % [o.name, Story.CHAPTERS[0].name], 1.8)
-	if "spare_rune" in relics:
+	hud.show_banner("DEPTH %s" % roman(depth), "%s · %s" % [o.name, Story.CHAPTERS[chapter()].name], 1.8)
+	if free_drafts > 0:
+		free_drafts -= 1
 		_open_draft()
 
 
@@ -613,7 +704,7 @@ func _log_run() -> void:
 		"at": Time.get_datetime_string_from_system(), "build": ProjectSettings.get_setting("application/config/version", "dev"),
 		"won": won, "depth": depth, "time": snappedf(run_time, 0.1), "kills": kills, "bosses": bosses,
 		"weapon": weapon, "runes": runes, "offered": offered, "lvl": lvl, "wax": run_wax, "vigil": vigil,
-		"revived": not hidden_candle and vigil < 3, "assist": opt_speed < 1.0 or opt_hearts or opt_undying, "undying": opt_undying, "smoke": smoke,
+		"revived": revived, "assist": opt_speed < 1.0 or opt_hearts or opt_undying, "undying": opt_undying, "smoke": smoke,
 	}
 	var f := FileAccess.open(RUNS_PATH, FileAccess.READ_WRITE if FileAccess.file_exists(RUNS_PATH) else FileAccess.WRITE)
 	if f == null:
@@ -722,7 +813,7 @@ func has_rune(r: String) -> bool:
 
 ## Multiplier applied to every hit the player lands.
 func damage_mul() -> float:
-	var m := 1.0 + 0.15 * temper
+	var m := (1.0 + 0.15 * temper) * (1.0 + bless_val("might") / 100.0)
 	if has_rune("WHETSTONE"):
 		m *= 1.25
 	if has_rune("GLASS EDGE"):
@@ -735,7 +826,7 @@ func damage_mul() -> float:
 
 
 func xp_need() -> int:
-	return 6 + lvl * 4
+	return maxi(3, roundi((6 + lvl * 4) * (1.0 - bless_val("growth") / 100.0)))
 
 
 func _open_draft() -> void:
@@ -779,6 +870,9 @@ func _take_rune(id: String) -> void:
 				player.slam_radius *= 1.25
 		hud.show_banner("%s SET" % sg, String(RunData.SETS[sg]).to_upper(), 2.0)
 		unlock("FULL_SET")
+	if free_drafts > 0:
+		free_drafts -= 1
+		_open_draft.call_deferred()
 
 
 func heal(n: int) -> void:
@@ -839,6 +933,9 @@ func _load_meta() -> void:
 		achieved = _cfg_arr(cfg, "achievements", "unlocked", [])
 		codex = _cfg_arr(cfg, "meta", "codex", [])
 		relics = _cfg_arr(cfg, "meta", "relics", [])
+		ranks = _cfg_dict(cfg, "meta", "ranks", {})
+		waystone = clampi(_cfg_int(cfg, "meta", "waystone", 0), 0, 3)
+		start_ch = clampi(_cfg_int(cfg, "meta", "start_ch", 0), 0, 3)
 		if earned >= 400 and not "sickle" in relics:
 			# saves from before the Reliquary unlocked the sickle at 400 earned
 			relics.append("sickle")
@@ -873,6 +970,9 @@ func _save_meta() -> void:
 	cfg.set_value("achievements", "unlocked", achieved)
 	cfg.set_value("meta", "codex", codex)
 	cfg.set_value("meta", "relics", relics)
+	cfg.set_value("meta", "ranks", ranks)
+	cfg.set_value("meta", "waystone", waystone)
+	cfg.set_value("meta", "start_ch", start_ch)
 	cfg.set_value("achievements", "elite_kills", elite_kills)
 	cfg.set_value("options", "shake", opt_shake)
 	cfg.set_value("options", "fullscreen", opt_fullscreen)
@@ -939,7 +1039,7 @@ func _step_pickups(dt: float) -> void:
 		pk.t += dt
 		var v: Vector2 = pk.vel
 		var d: Vector2 = target - pk.pos
-		if pk.t > 0.35 and d.length() < 220:
+		if pk.t > 0.35 and d.length() < 220 * (1.0 + bless_val("magnet") / 100.0):
 			v = v.lerp(d.normalized() * 900, minf(1, dt * 8))
 		else:
 			v.y += 1400 * dt
@@ -953,7 +1053,9 @@ func _step_pickups(dt: float) -> void:
 		pk.pos = np
 		if d.length() < 22:
 			pk.t = 99.0
-			run_wax += (3 if has_rune("HUNGER") else 2) + (1 if "EMBER" in sets_done else 0)
+			var gain := ((3 if has_rune("HUNGER") else 2) + (1 if "EMBER" in sets_done else 0)) * (1.0 + bless_val("greed") / 100.0) + ash_frac
+			run_wax += floori(gain)
+			ash_frac = gain - floori(gain)
 			xp += 1
 			if xp >= xp_need():
 				xp -= xp_need()
@@ -1075,7 +1177,7 @@ func _victory() -> void:
 	won = true
 	learn("dawn")
 	unlock("DAWN")
-	if hidden_candle and vigil < 3:
+	if not revived and vigil < 3:
 		unlock("DAWN_UNAIDED")
 	if vigil >= 5:
 		unlock("VIGIL_V")
@@ -1090,7 +1192,10 @@ func hp_mul() -> float:
 func try_revive() -> bool:
 	if not hidden_candle:
 		return false
-	hidden_candle = false
+	revived = true
+	# a spare candle keeps the hidden candle lit for one more return
+	hidden_candle = spare_candles > 0
+	spare_candles -= 1
 	unlock("NOT_YET")
 	player.hp = ceilf(player.max_hp / 2)
 	player.invuln = 2.2
@@ -1099,7 +1204,7 @@ func try_revive() -> bool:
 	hud.flash(Color.WHITE, 0.3)
 	fx.ring(player.position, 220, Color("#f2b43a"))
 	fx.burst(player.position + Vector2(0, -30), 24, Color("#f2b43a"), 220)
-	hud.show_banner("NOT YET", "THE HIDDEN CANDLE RETURNS · IT WILL NOT RETURN AGAIN", 2.2)
+	hud.show_banner("NOT YET", "THE SPARE CANDLE STILL BURNS · ONE MORE RETURN" if hidden_candle else "THE HIDDEN CANDLE RETURNS · IT WILL NOT RETURN AGAIN", 2.2)
 	for e in enemies:
 		if not e.dead and e.position.distance_to(player.position) < 200:
 			hit_enemy(e, 3, Vector2(signf(e.position.x - player.position.x) * 420, -420))
@@ -1232,7 +1337,7 @@ func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 		fx.spark(e.position + Vector2(e.facing * 16, -30))
 	if not skill_hit and weapon != "":
 		var was_ready := skill_meter >= 1.0
-		skill_meter = minf(1.0, skill_meter + (0.05 if e == boss else 0.07))
+		skill_meter = minf(1.0, skill_meter + (0.05 if e == boss else 0.07) * (1.0 + bless_val("charge") / 100.0))
 		if not was_ready and skill_meter >= 1.0:
 			hud.show_banner("%s READY" % RunData.SKILLS[weapon].name, "PRESS %s" % hud.btn("skill"), 1.0)
 	e.hp -= dmg * damage_mul() * guard * (1.6 if e == boss and has_rune("TALLOW CROWN") else 1.0)
@@ -1270,11 +1375,21 @@ func hit_enemy(e: Enemy, dmg: float, kb: Vector2) -> void:
 		if has_rune("BLOODLINE") and kills % 20 == 0:
 			heal(1)
 			hud.show_banner("BLOODLINE", "+20 HP", 1.0)
+		if rank("mend") > 0:
+			regen_k += 1
+			if regen_k >= bless_val("mend"):
+				regen_k = 0
+				heal(1)
 		if e == boss:
 			bosses += 1
 			var bi: int = (e as Boss).idx
 			if bi < 3:
 				unlock(["WARDEN_FREED", "KING_DROWNED", "JARL_SONG"][bi])
+				if waystone < bi + 1:
+					waystone = bi + 1
+					start_ch = waystone
+					lit_waystone = waystone
+					_save_meta()
 			if boss_untouched and not smoke:
 				unlock("UNTOUCHED")
 			story_hold = true
@@ -1300,7 +1415,9 @@ func on_player_dead() -> void:
 func _end_run() -> void:
 	Engine.time_scale = opt_speed
 	_log_run()
-	var kept := (run_wax if won else roundi(run_wax * 0.4)) + bosses * 50
+	var keep_pct := bless_val("keep")
+	var earned_run := maxi(0, run_wax - start_wax)
+	var kept := (earned_run if won else roundi(earned_run * keep_pct / 100.0)) + (bosses - start_bosses) * 50
 	var before := earned
 	bank += kept
 	earned += kept
@@ -1317,12 +1434,15 @@ func _end_run() -> void:
 	var affordable := RunData.RELICS.filter(func(r): return not r.id in relics and r.cost <= bank and r.cost > bank - kept)
 	if not affordable.is_empty():
 		unlocked = "NEW IN THE RELIQUARY · %s" % affordable[0].name
+	if lit_waystone > 0:
+		unlocked = ("%s  ·  " % unlocked if unlocked != "" else "") + "WAYSTONE %s LIT" % roman(lit_waystone + 1)
+		lit_waystone = 0
 	if unlocked_vigil > 0:
 		unlocked = ("%s  ·  " % unlocked if unlocked != "" else "") + "VIGIL %s" % roman(unlocked_vigil)
 		unlocked_vigil = 0
 	var title := "THE DAWN RETURNS" if won else "EXTINGUISHED"
 	var col := Color("#f2b43a") if won else Color("#e5383b")
-	hud.open_summary({"title": title, "col": col, "won": won, "depth": depth, "time": run_time, "kills": kills, "bosses": bosses, "wax": run_wax, "kept": kept, "bank": bank, "unlocked": unlocked})
+	hud.open_summary({"title": title, "col": col, "won": won, "depth": depth, "time": run_time, "kills": kills, "bosses": bosses, "wax": run_wax, "kept": kept, "keep_pct": keep_pct, "bank": bank, "unlocked": unlocked})
 
 
 func shake(t: float, mag: float) -> void:

@@ -318,6 +318,11 @@ func _attack_hits() -> void:
 func take_hit(from_x: float) -> void:
 	if invuln > 0 or dash > 0 or dead:
 		return
+	if randf() * 100.0 < game.bless_val("ward"):
+		# Ward (a Reliquary blessing): the hit glances off
+		invuln = 0.6
+		game.fx.ring(position + Vector2(0, -30), 60, Color("#f2b43a"))
+		return
 	hp -= 1
 	if game.opt_undying and hp < 1:
 		# assist: the wick gutters but never goes out
